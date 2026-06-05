@@ -897,7 +897,7 @@ const StoryboardModule = {
                         </span>
                     </div>
                 </div>
-                ${audUrl ? `<audio class="sb-local-player" id="sbAaudio_${g.id}_${i}" controls preload="none" src="${audUrl}"></audio>` : ''}
+                ${audUrl ? `<audio id="sbAaudio_${g.id}_${i}" preload="none" src="${audUrl}" style="display:none"></audio>` : ''}
             </div>
         </div>`;
     },
@@ -2082,7 +2082,7 @@ const StoryboardModule = {
                 </div>
                 ${curUrl ? `<div class="sb-audio-ref"><span class="sb-audio-ref-label">当前配音</span><audio controls preload="none" src="${curUrl}"></audio></div>` : ''}
                 <div id="saResult" style="margin-top:0.6rem"></div>
-                ${histList.length > 1 ? `
+                ${histList.length >= 1 ? `
                     <details class="sb-audio-hist-block" open>
                         <summary>配音历史（${histList.length} 条）</summary>
                         <div class="audio-history-list">${this._renderAudioHistItems(gid, panelIdx, histList, curAudId)}</div>
@@ -2144,8 +2144,15 @@ const StoryboardModule = {
         this.render(this.projectId);
     },
 
-    deletePanelAudio(gid, panelIdx, mediaId) {
-        if (!window.confirm('确定删除这条配音？')) return;
+    async deletePanelAudio(gid, panelIdx, mediaId) {
+        const ok = await App.confirm({
+            title: '删除配音',
+            message: '确定删除这条配音历史？删除后不可恢复。',
+            okText: '删除',
+            cancelText: '取消',
+            danger: true,
+        });
+        if (!ok) return;
         const mid = parseInt(mediaId);
         Storage.deleteMediaItem(this.projectId, mid);
         const pp = Storage.getProject(this.projectId);

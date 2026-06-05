@@ -827,13 +827,13 @@ border-radius:12px;padding:16px;box-shadow:0 12px 40px rgba(0,0,0,.5)}
 .sb-dir-prev-cap{position:absolute;left:0;right:0;bottom:0;background:linear-gradient(transparent,rgba(0,0,0,.75));
     color:#fff;font-size:0.8rem;text-align:center;padding:0.6rem 1rem 0.5rem}
 .sb-dir-prev-empty{color:var(--t3);font-size:0.8rem;padding:2rem}
-/* 播放/选段时显示的「当前台词」条：醒目居中，显示完整说的话 */
-.sb-dir-prev-talk{display:flex;align-items:center;gap:0.5rem;padding:0.6rem 0.9rem;
-    background:linear-gradient(180deg,rgba(52,211,153,.10),rgba(124,130,255,.06));
+/* 播放/选段时显示的「当前台词」条：浅底深字，字号偏小 */
+.sb-dir-prev-talk{display:flex;align-items:center;gap:0.45rem;padding:0.45rem 0.8rem;
+    background:rgba(255,255,255,.92);
     border-bottom:1px solid var(--bd)}
-.sb-dir-prev-talk-icon{font-size:0.95rem;flex-shrink:0}
-.sb-dir-prev-talk-text{flex:1;min-width:0;font-size:0.92rem;font-weight:700;color:var(--t1,#e7e9f0);
-    line-height:1.5;word-break:break-word}
+.sb-dir-prev-talk-icon{font-size:0.8rem;flex-shrink:0}
+.sb-dir-prev-talk-text{flex:1;min-width:0;font-size:0.74rem;font-weight:600;color:#1f2430;
+    line-height:1.45;word-break:break-word}
 /* 预览区下方 local 提示词编辑框（美化版） */
 .sb-dir-prev-prompt{padding:0.7rem 0.8rem 0.8rem;background:linear-gradient(180deg,rgba(124,130,255,.06),var(--card-solid,#1c1f2b))}
 .sb-dir-prev-phead{display:flex;align-items:center;justify-content:space-between;margin-bottom:0.45rem}
