@@ -2686,11 +2686,13 @@ const StoryboardModule = {
                 }
 
                 if (isBodyDrag && kind === 'aud') {
-                    // ===== 音频移位：始终磁吸避让，互不重叠（与图片轨一致的排斥行为）=====
-                    let ns = Math.max(0, orig.start + dFrames);
-                    ns = self._snapAudioAvoid(clip, ns);   // 碰到相邻段就贴边停下，绝不重叠
-                    clip.start = ns;
+                    // ===== 音频移位：拖动时平滑自由跟随鼠标（允许临时重叠，不吸附，避免跳变）=====
+                    // 松手时（onUp）再做一次防重叠吸附落位，落位带平滑动画。
+                    clip.start = Math.max(0, orig.start + dFrames);
                     self._renderTracks();
+                    // 给正在拖动的块加高亮，提示「松手后会自动避让对齐」
+                    const cur = document.querySelector(`.sb-dir-clip[data-kind="aud"][data-uid="${uid}"]`);
+                    if (cur) cur.classList.add('sb-dir-aud-dragging');
                     return;
                 }
 
@@ -2734,15 +2736,20 @@ const StoryboardModule = {
                 document.removeEventListener('mouseup', onUp);
                 document.body.classList.remove('sb-dir-dragging-cursor');
                 self._clearDropIndicator();
-                if (isBodyDrag && moved && dropTarget != null) {
-                    // 松手才真正落位：移动到目标索引 → relayout → 重绘（带平滑过渡）
+                if (isImgReorder && moved && dropTarget != null) {
+                    // 图像：松手才真正落位 → 移到目标索引 → relayout → 重绘（带平滑过渡）
                     const from = arr.findIndex(c => c.uid === uid);
                     const moving = arr[from];
                     arr.splice(from, 1);
                     arr.splice(dropTarget, 0, moving);
-                    if (kind === 'img') self._relayoutImages();
-                    else self._reorderAudioByStart(uid);
-                    self._tl._animateNext = true;   // 下次渲染启用落位动画
+                    self._relayoutImages();
+                    self._tl._animateNext = true;
+                } else if (isBodyDrag && kind === 'aud' && moved) {
+                    // 音频：拖动时自由跟随（可能临时重叠），松手时一次性吸附避让到不重叠位置，
+                    // 再按 start 排序保持视觉顺序，启用平滑落位动画（不会瞬移跳变）。
+                    clip.start = self._snapAudioAvoid(clip, clip.start);
+                    self._reorderAudioByStart(uid);
+                    self._tl._animateNext = true;
                 }
                 // 未发生拖动 = 视为「点击」：图像段则选中并在预览区展示
                 if (isBodyDrag && !moved && kind === 'img') self._tl.selectedUid = uid;

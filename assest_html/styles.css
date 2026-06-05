@@ -745,6 +745,9 @@ border:1px solid rgba(255,255,255,.18);box-shadow:0 2px 8px rgba(0,0,0,.4);user-
 .sb-dir-clip.sb-dir-dragging{opacity:.92;box-shadow:0 12px 28px rgba(0,0,0,.55);outline:2px solid var(--ac,#7c82ff);
 filter:brightness(1.05);will-change:transform;transition:none;pointer-events:none}
 body.sb-dir-dragging-cursor{cursor:grabbing !important}
+/* 音频拖动中：抬起高亮 + 关闭过渡（避免与跟随鼠标冲突造成滞后跳变），置顶显示 */
+.sb-dir-clip.sb-dir-aud-dragging{transition:none !important;z-index:40;opacity:.95;
+    box-shadow:0 8px 22px rgba(0,0,0,.5);outline:2px solid rgba(80,220,140,.9);filter:brightness(1.08)}
 /* 插入指示线：拖动中显示「松手会落到这里」 */
 .sb-dir-drop-line{position:absolute;width:3px;background:var(--ac,#7c82ff);border-radius:2px;z-index:40;pointer-events:none;
 box-shadow:0 0 8px var(--ac,#7c82ff);animation:sbDropPulse .8s ease-in-out infinite}
