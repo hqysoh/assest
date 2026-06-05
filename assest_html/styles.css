@@ -776,6 +776,9 @@ border-left:5px solid transparent;border-right:5px solid transparent}
 .sb-dir-clip-prompt{font-size:0.6rem;line-height:1.25;color:#fff;margin-top:2px;
     text-shadow:0 1px 3px rgba(0,0,0,.9);text-align:center;
     display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word}
+/* 音频块上叠加的台词（单行省略，避免撑高音轨） */
+.sb-dir-clip-talk{font-size:0.58rem;line-height:1.2;color:rgba(255,255,255,.92);margin-top:1px;
+    text-shadow:0 1px 2px rgba(0,0,0,.85);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .sb-dir-noimg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#fff;font-size:0.7rem;opacity:.7}
 .sb-dir-clip-x{position:absolute;top:2px;right:2px;width:16px;height:16px;border:none;border-radius:5px;
     background:rgba(0,0,0,.55);color:#fff;font-size:0.8rem;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:3;padding:0}
@@ -824,6 +827,13 @@ border-radius:12px;padding:16px;box-shadow:0 12px 40px rgba(0,0,0,.5)}
 .sb-dir-prev-cap{position:absolute;left:0;right:0;bottom:0;background:linear-gradient(transparent,rgba(0,0,0,.75));
     color:#fff;font-size:0.8rem;text-align:center;padding:0.6rem 1rem 0.5rem}
 .sb-dir-prev-empty{color:var(--t3);font-size:0.8rem;padding:2rem}
+/* 播放/选段时显示的「当前台词」条：醒目居中，显示完整说的话 */
+.sb-dir-prev-talk{display:flex;align-items:center;gap:0.5rem;padding:0.6rem 0.9rem;
+    background:linear-gradient(180deg,rgba(52,211,153,.10),rgba(124,130,255,.06));
+    border-bottom:1px solid var(--bd)}
+.sb-dir-prev-talk-icon{font-size:0.95rem;flex-shrink:0}
+.sb-dir-prev-talk-text{flex:1;min-width:0;font-size:0.92rem;font-weight:700;color:var(--t1,#e7e9f0);
+    line-height:1.5;word-break:break-word}
 /* 预览区下方 local 提示词编辑框（美化版） */
 .sb-dir-prev-prompt{padding:0.7rem 0.8rem 0.8rem;background:linear-gradient(180deg,rgba(124,130,255,.06),var(--card-solid,#1c1f2b))}
 .sb-dir-prev-phead{display:flex;align-items:center;justify-content:space-between;margin-bottom:0.45rem}
@@ -1034,32 +1044,52 @@ border-radius:12px;padding:16px;box-shadow:0 12px 40px rgba(0,0,0,.5)}
     font-weight:500;
 }
 
-/* 台词区：单行四列 —— 说话人(自适应) | 台词(1fr 吃满拉长) | 语气(自适应) | 配音按钮(最右) */
+/* 台词区：两行布局
+ * 第一行：说话人下拉(左) ····· 配音/播放/历史按钮(右)
+ * 第二行：台词(吃满) + 语气(右) */
 .sb-local-dialogue{
-    display:grid;
-    grid-template-columns:auto minmax(0,1fr) auto auto;
-    align-items:center;          /* 默认垂直居中；台词编辑加高时由下方规则改为顶对齐 */
-    gap:0.4rem 0.6rem;
+    display:flex;
+    flex-direction:column;
+    gap:0.35rem;
     font-size:0.72rem;color:var(--t2);line-height:1.45;
     min-width:0;
 }
-/* 当台词处于编辑态（加高）时，整行子项改顶对齐，避免说话人/语气/配音被居中拉伸 */
-.sb-local-dialogue:focus-within{align-items:start}
-/* 说话人：胶囊样式，内容自适应宽度，放在台词左侧 */
-.sb-dlg-who{
-    justify-self:start;
-    max-width:160px;
+/* 第一行：名牌左、按钮右 */
+.sb-dlg-line1{
+    display:flex;align-items:center;justify-content:space-between;gap:0.5rem;min-width:0;
+}
+/* 第二行：台词吃满 + 语气自适应 */
+.sb-dlg-line2{
+    display:grid;
+    grid-template-columns:minmax(0,1fr) auto;
+    align-items:center;
+    gap:0.4rem 0.6rem;
+    min-width:0;
+}
+.sb-dlg-line2:focus-within{align-items:start}
+
+/* 说话人下拉：胶囊样式，内容自适应（与原名牌观感一致） */
+.sb-dlg-who-wrap{display:flex;align-items:center;gap:0.3rem;min-width:0}
+.sb-dlg-who-select{
+    max-width:180px;
     font-weight:700;color:var(--ac);
     background:linear-gradient(135deg, rgba(167,139,250,.18), rgba(99,102,241,.12));
+    border:1px solid transparent;
     border-radius:999px;
-    padding:3px 12px;
+    padding:3px 26px 3px 12px;
     font-size:0.68rem;
-    text-align:center;
-    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+    cursor:pointer;
+    outline:none;
+    appearance:none;-webkit-appearance:none;
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%23a78bfa' stroke-width='3'><path d='M6 9l6 6 6-6'/></svg>");
+    background-repeat:no-repeat;background-position:right 9px center;
+    transition:background .18s, border-color .18s;
 }
-.sb-dlg-who.is-empty{background:transparent;color:var(--t3);font-weight:400}
-.sb-dlg-who:hover{background:linear-gradient(135deg, rgba(167,139,250,.28), rgba(99,102,241,.2))}
-.sb-dlg-who:focus,.sb-dlg-who.editing{background:var(--bg2)}
+.sb-dlg-who-select.is-empty{color:var(--t3);font-weight:500;background:var(--bg3)}
+.sb-dlg-who-select:hover{border-color:var(--ac)}
+.sb-dlg-who-select:focus{border-color:var(--ac);box-shadow:0 0 0 2px var(--glow)}
+.sb-dlg-who-select option{background:var(--bg2);color:var(--t1)}
+.sb-dlg-novoice{font-size:0.78rem;cursor:help;line-height:1}
 
 /* 台词：第二列，吃满中间剩余空间。非编辑态统一高度（单行省略，所有行高度一致）；
  * 聚焦编辑时（见下方 :focus/.editing）自动加高、多行展开。 */

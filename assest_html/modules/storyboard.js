@@ -872,32 +872,88 @@ const StoryboardModule = {
                     className: 'sb-local-prompt clamp-1',
                     data: { edit: 'sb-panel', gid: g.id, panel: i, field: 'local' } })}
                 <div class="sb-local-dialogue">
-                    ${InlineEdit.field(d.character || '', {
-                        single: true, placeholder: '说话人',
-                        className: 'sb-dlg-who clamp-1',
-                        data: { edit: 'sb-panel', gid: g.id, panel: i, field: 'character' } })}
-                    ${InlineEdit.field(d.text || '', {
-                        placeholder: '台词…',
-                        className: 'sb-dlg-text',
-                        data: { edit: 'sb-panel', gid: g.id, panel: i, field: 'text' } })}
-                    <span class="sb-dlg-tone-wrap">
-                        <span class="sb-dlg-tone-icon">🎭</span>
-                        ${InlineEdit.field(tone, {
-                            single: true, placeholder: '语气',
-                            className: 'sb-dlg-tone clamp-1',
-                            data: { edit: 'sb-panel', gid: g.id, panel: i, field: 'tone' } })}
-                    </span>
-                    <div class="sb-local-audio">
+                    <div class="sb-dlg-line1">
+                        ${this._panelCharSelect(g, i, d.character || '')}
                         <div class="sb-local-audio-btns">
                             <button class="btn-ghost btn-tiny ${audioing ? 'btn-disabled' : ''}" id="sbA_${g.id}_${i}"
-                                onclick="${audioing ? '' : `StoryboardModule.openAudioModal('${g.id}',${i})`}">${audioing ? `⏳ ${aElapsed}s` : (audUrl ? '🔄 重配' : '🔊 配音')}</button>
-                            ${histCount > 1 ? `<button class="btn-ghost btn-tiny" onclick="StoryboardModule.showAudioHistory('${g.id}',${i})">📜 历史(${histCount})</button>` : ''}
+                                onclick="${audioing ? '' : `StoryboardModule.openAudioModal('${g.id}',${i})`}">${audioing ? `⏳ ${aElapsed}s` : (audUrl ? '🔄 配音' : '🔊 配音')}</button>
+                            <button class="btn-ghost btn-tiny ${audUrl ? '' : 'btn-disabled'}" id="sbAplay_${g.id}_${i}"
+                                onclick="${audUrl ? `StoryboardModule.togglePanelPlay('${g.id}',${i})` : ''}">▶ 播放</button>
+                            <button class="btn-ghost btn-tiny ${histCount ? '' : 'btn-disabled'}"
+                                onclick="${histCount ? `StoryboardModule.showAudioHistory('${g.id}',${i})` : ''}">📜 历史${histCount ? `(${histCount})` : ''}</button>
                         </div>
                     </div>
+                    <div class="sb-dlg-line2">
+                        ${InlineEdit.field(d.text || '', {
+                            placeholder: '台词…',
+                            className: 'sb-dlg-text',
+                            data: { edit: 'sb-panel', gid: g.id, panel: i, field: 'text' } })}
+                        <span class="sb-dlg-tone-wrap">
+                            <span class="sb-dlg-tone-icon">🎭</span>
+                            ${InlineEdit.field(tone, {
+                                single: true, placeholder: '语气',
+                                className: 'sb-dlg-tone clamp-1',
+                                data: { edit: 'sb-panel', gid: g.id, panel: i, field: 'tone' } })}
+                        </span>
+                    </div>
                 </div>
-                ${audUrl ? `<audio class="sb-local-player" controls preload="none" src="${audUrl}"></audio>` : ''}
+                ${audUrl ? `<audio class="sb-local-player" id="sbAaudio_${g.id}_${i}" controls preload="none" src="${audUrl}"></audio>` : ''}
             </div>
         </div>`;
+    },
+
+    // 说话人人物下拉：选人物→自动匹配其音色；标注是否已有音色，缺音色给提示
+    _panelCharSelect(g, i, cur) {
+        const p = Storage.getProject(this.projectId);
+        const chars = p.characters || [];
+        const curChar = chars.find(c => c.name === cur);
+        const hasVoice = curChar ? !!Storage.getSelectedMedia(this.projectId, 'characters', curChar, 'audio') : false;
+        const opts = ['<option value="">— 选择人物 —</option>']
+            .concat(chars.map(c => {
+                const v = !!Storage.getSelectedMedia(this.projectId, 'characters', c, 'audio');
+                return `<option value="${this.esc(c.name)}" ${c.name === cur ? 'selected' : ''}>${this.esc(c.name)}${v ? ' 🔊' : ''}</option>`;
+            }))
+            .join('');
+        // 选中了人物但该人物没有音色 → 名牌右侧给一个⚠️提示
+        const warn = (cur && !hasVoice) ? '<span class="sb-dlg-novoice" title="该人物尚无音色，请先到人物页生成音频">⚠️</span>' : '';
+        return `<div class="sb-dlg-who-wrap">
+            <select class="sb-dlg-who-select ${cur ? '' : 'is-empty'}" onchange="StoryboardModule.setPanelCharacter('${g.id}',${i},this.value)">${opts}</select>
+            ${warn}
+        </div>`;
+    },
+
+    // 下拉选择说话人 → 写回 dialogue.character（配音时按此名字自动匹配人物音色）
+    setPanelCharacter(gid, i, name) {
+        const p = Storage.getProject(this.projectId);
+        const g = (p.storyboardGroups || []).find(x => x.id === gid);
+        if (!g) return;
+        if (!Array.isArray(g.dialogues)) g.dialogues = [];
+        const d = g.dialogues[i] || { panel: i + 1 };
+        d.character = name || '';
+        g.dialogues[i] = d;
+        Storage.updateProject(this.projectId, { storyboardGroups: p.storyboardGroups });
+        this.render(this.projectId);
+    },
+
+    // 行内「▶ 播放 / ⏸」：播放该 panel 当前配音音频（与其它行内播放互斥）
+    togglePanelPlay(gid, i) {
+        const a = document.getElementById('sbAaudio_' + gid + '_' + i);
+        const b = document.getElementById('sbAplay_' + gid + '_' + i);
+        if (!a) return;
+        a.onended = () => { if (b) b.textContent = '▶ 播放'; this._curRowAudio = null; };
+        if (a.paused) {
+            if (this._curRowAudio && this._curRowAudio !== a) {
+                this._curRowAudio.pause();
+                const prev = this._curRowAudio._btn;
+                if (prev) prev.textContent = '▶ 播放';
+            }
+            a.play(); a._btn = b; this._curRowAudio = a;
+            if (b) b.textContent = '⏸ 暂停';
+        } else {
+            a.pause();
+            if (b) b.textContent = '▶ 播放';
+            this._curRowAudio = null;
+        }
     },
 
     // 勾选/取消「纳入合成视频」（四宫格某一面板）
@@ -2333,19 +2389,23 @@ const StoryboardModule = {
         let cursor = 0;
         segments.forEach(s => {
             const len = s.length || DEF;
+            const imgUid = Storage._uid();
             imageClips.push({
-                uid: Storage._uid(),
+                uid: imgUid,
                 imageId: s.imageId, prompt: s.prompt || '',
                 dialogue: s.dialogue || {}, transition: s.transition || 'cut',
                 start: cursor, length: len,
             });
             if (s.audioId != null) {
-                // 默认音频块与对应图像对齐；后续可自由拖拽/裁剪
+                // 音频块与对应图像对齐（同 start）；length 先用图像段长度，
+                // 待 _loadAudioDurations 探测到真实时长后回填，并把图像段也对齐到音频时长。
                 audioClips.push({
                     uid: Storage._uid(),
                     audioId: s.audioId,
+                    imgUid,                         // 关联的图像段（初始化对齐用）
+                    text: (s.dialogue && s.dialogue.text) || '',  // 台词，clip 上显示
                     start: cursor, length: len, trimStart: 0,
-                    audioDurationFrames: 0,   // 加载后回填（用于裁剪上限）
+                    audioDurationFrames: 0,         // 加载后回填（裁剪上限 + 初始化对齐）
                 });
             }
             cursor += len;
@@ -2363,11 +2423,13 @@ const StoryboardModule = {
             playFrame: 0, playing: false,
         };
         this._renderTimeline();
-        this._loadAudioDurations();              // 异步回填音频时长（裁剪上限）
+        this._loadAudioDurations(true);          // 异步回填音频时长，并按时长对齐图音、统一序号
     },
 
-    // 读取各音频块真实时长（秒→帧），用于裁剪/拉伸上限提示
-    async _loadAudioDurations() {
+    // 读取各音频块真实时长（秒→帧）。除了用于裁剪上限，还在「初始化对齐」时
+    // 把音频块 length 设为真实时长，并让其关联的图像段对齐到同样时长（s 数一致），
+    // 然后整体重新紧贴布局、音频跟随对应图像段的 start —— 实现「图音对齐、序号一致」。
+    async _loadAudioDurations(alignInit) {
         const tl = this._tl; if (!tl) return;
         for (const a of tl.audioClips) {
             if (a.audioDurationFrames) continue;
@@ -2375,8 +2437,25 @@ const StoryboardModule = {
             if (!m) continue;
             try {
                 const dur = await this._probeAudioDuration(Storage.mediaUrl(m.data));
-                a.audioDurationFrames = Math.round(dur * tl.fps);
+                a.audioDurationFrames = Math.max(1, Math.round(dur * tl.fps));
+                if (alignInit) {
+                    // 音频块时长 = 真实时长
+                    a.length = a.audioDurationFrames;
+                    // 关联图像段时长也对齐到音频时长（图音 s 数一致）
+                    const img = a.imgUid ? tl.imageClips.find(c => c.uid === a.imgUid) : null;
+                    if (img) img.length = a.audioDurationFrames;
+                }
             } catch (e) { /* 忽略 */ }
+        }
+        if (alignInit) {
+            // 图像轨重新紧贴布局；音频跟随各自图像段 start 对齐；总长 = 末段结束
+            this._relayoutImages();
+            tl.audioClips.forEach(a => {
+                const img = a.imgUid ? tl.imageClips.find(c => c.uid === a.imgUid) : null;
+                if (img) a.start = img.start;
+            });
+            const far = tl.imageClips.reduce((mx, c) => Math.max(mx, c.start + c.length), 0);
+            if (far > 0) tl.totalFrames = far;
         }
         if (this._tl) this._renderTimeline();
     },
@@ -2538,15 +2617,18 @@ const StoryboardModule = {
                 <div class="sb-dir-handle r" data-h="r" title="拖动改时长（后续图片跟随移动）"></div>
             </div>${secBelow}`;
         } else {
-            const m = c.audioId != null ? Storage.getMediaById(this.projectId, c.audioId) : null;
-            const name = m ? (m.fileName || m.ownerType || '音频') : '音频';
             const trimSec = (c.trimStart / tl.fps).toFixed(1);
+            // 序号：与该音频对齐的图像段保持一致（拿不到则按音频自身索引兜底）
+            const imgIdx = c.imgUid ? tl.imageClips.findIndex(x => x.uid === c.imgUid) : -1;
+            const no = (imgIdx >= 0 ? imgIdx : i) + 1;
+            const talk = c.text ? this.esc(c.text) : '';
             return `<div class="sb-dir-clip sb-dir-aud ${overflow ? 'sb-dir-of' : ''}" data-kind="aud" data-uid="${c.uid}" data-i="${i}"
                 style="left:${left}px;width:${width}px">
                 ${overflow ? '<div class="sb-dir-of-badge" title="超出视频总长，不会被合成">超出</div>' : ''}
                 <div class="sb-dir-handle l" data-h="trim" title="左侧=裁剪音频起点"></div>
-                <div class="sb-dir-clip-body sb-dir-wave" title="拖动移位 / 右侧拉伸时长 / 左侧裁剪起点">
-                    <span class="sb-dir-clip-meta">🎵 ${this.esc(name)}${c.trimStart ? ` · 裁${trimSec}s` : ''}</span>
+                <div class="sb-dir-clip-body sb-dir-wave" title="${talk || '配音'}${c.trimStart ? `（裁 ${trimSec}s）` : ''}">
+                    <span class="sb-dir-clip-meta">🎵 #${no} · ${secsLabel}${c.trimStart ? ` · 裁${trimSec}s` : ''}</span>
+                    ${talk ? `<span class="sb-dir-clip-talk" title="${talk}">${talk}</span>` : ''}
                     <button class="sb-dir-clip-x" title="删除" onmousedown="event.stopPropagation()" onclick="StoryboardModule.tlDelClip('aud','${c.uid}')">×</button>
                 </div>
                 <div class="sb-dir-handle r" data-h="r" title="右侧=改时长"></div>
@@ -2575,11 +2657,10 @@ const StoryboardModule = {
             const orig = { start: clip.start, length: clip.length, trimStart: clip.trimStart || 0 };
             const maxFrames = clip.audioDurationFrames || 0;   // 音频可用总帧（裁剪上限）
             let moved = false;
-            // 图像本体拖动 = 换位（浮起预览，松手才落位）；音频本体拖动 = 速度感应移位（快=吸附避让，慢=自由重叠）
+            // 图像本体拖动 = 换位（浮起预览，松手才落位）；音频本体拖动 = 始终吸附避让，互不重叠
             const isBodyDrag = !handle;
             const isImgReorder = isBodyDrag && kind === 'img';   // 仅图像走换位模型
             let dropTarget = null;               // 图像换位时计算出的目标插入索引
-            let lastX = e.clientX, lastT = performance.now();   // 用于估算拖动速度
 
             if (isImgReorder) { el.classList.add('sb-dir-dragging'); document.body.classList.add('sb-dir-dragging-cursor'); }
 
@@ -2598,16 +2679,10 @@ const StoryboardModule = {
                 }
 
                 if (isBodyDrag && kind === 'aud') {
-                    // ===== 音频移位：根据拖动速度决定行为 =====
-                    // 快速拖动 → 磁吸避让（碰到相邻段停下，不重叠）；慢速拖动 → 自由移位（可重叠，便于精修对齐）
-                    const now = performance.now();
-                    const dt = Math.max(1, now - lastT);
-                    const speed = Math.abs(ev.clientX - lastX) / dt;   // px/ms
-                    lastX = ev.clientX; lastT = now;
-                    const FAST = 1.2;   // px/ms 阈值：> 视为快速拖动
+                    // ===== 音频移位：始终磁吸避让，互不重叠（与图片轨一致的排斥行为）=====
                     let ns = Math.max(0, orig.start + dFrames);
-                    if (speed > FAST) ns = self._snapAudioAvoid(clip, ns);   // 快速 → 吸附避让
-                    clip.start = ns;                                          // 慢速 → 自由（可重叠）
+                    ns = self._snapAudioAvoid(clip, ns);   // 碰到相邻段就贴边停下，绝不重叠
+                    clip.start = ns;
                     self._renderTracks();
                     return;
                 }
@@ -2906,7 +2981,13 @@ const StoryboardModule = {
         const c = this._previewClip();
         const idx = c ? tl.imageClips.indexOf(c) + 1 : 0;
         const promptVal = c ? (c.prompt || '') : '';
+        // 当前台词：播放时取命中当前帧的音频块台词；非播放时取选中图像段对应音频/对白
+        const talk = this._currentTalk();
+        const talkBar = talk
+            ? `<div class="sb-dir-prev-talk"><span class="sb-dir-prev-talk-icon">🗣️</span><span class="sb-dir-prev-talk-text">${this.esc(talk)}</span></div>`
+            : '';
         host.innerHTML = c ? `
+            ${talkBar}
             <div class="sb-dir-prev-prompt">
                 <div class="sb-dir-prev-phead">
                     <span class="sb-dir-prev-plabel">✎ 第 ${idx} 段 · local 提示词</span>
@@ -2918,12 +2999,33 @@ const StoryboardModule = {
             </div>`
             : `<div class="sb-dir-prev-empty">点击上方图像段，可在此查看 / 编辑该段的 local 提示词</div>`;
         this._prevUid = c ? c.uid : null;
+        this._prevTalk = talk;
     },
-    // 播放时高频调用：命中段变化才刷新提示词区（无画面 stage，避免打断编辑）
+    // 当前应显示的台词：播放中→命中当前帧的音频块台词；非播放→选中图像段对应的台词
+    _currentTalk() {
+        const tl = this._tl;
+        if (!tl) return '';
+        if (tl.playing) {
+            const f = tl.playFrame || 0;
+            let hit = null;
+            tl.audioClips.forEach(c => { if (f >= c.start && f < c.start + c.length) hit = c; });
+            if (hit) return hit.text || '';
+            // 没有命中音频时，退而显示当前画面段的对白文本
+            const img = this._imageAtFrame(f);
+            return (img && img.dialogue && img.dialogue.text) || '';
+        }
+        const sel = tl.imageClips.find(c => c.uid === tl.selectedUid) || tl.imageClips[0];
+        if (!sel) return '';
+        const aud = tl.audioClips.find(a => a.imgUid === sel.uid);
+        if (aud && aud.text) return aud.text;
+        return (sel.dialogue && sel.dialogue.text) || '';
+    },
+    // 播放时高频调用：命中段或台词变化才刷新提示词区（无画面 stage，避免打断编辑）
     _updateStage() {
         const c = this._previewClip();
         const curUid = c ? c.uid : null;
-        if (curUid !== this._prevUid) this._updatePreview();
+        const talk = this._currentTalk();
+        if (curUid !== this._prevUid || talk !== this._prevTalk) this._updatePreview();
     },
     _stageInner(c) {
         const m = c && c.imageId != null ? Storage.getMediaById(this.projectId, c.imageId) : null;
