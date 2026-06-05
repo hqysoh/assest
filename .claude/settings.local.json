@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python backend.py)",
+      "Bash(echo \"后端 PID: $!\")",
+      "Bash(python -m http.server 8000)",
+      "Bash(echo \"前端 PID: $!\")",
+      "Bash(curl -s http://localhost:8765)",
+      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code}\" http://localhost:8000)",
+      "Bash(curl -s http://localhost:8000/modules/project.js)",
+      "Bash(node -c)",
+      "Bash(curl -s -X POST http://localhost:8765/api/sync_data -H 'Content-Type: application/json' -d '{ *)",
+      "Bash(curl -s -X POST http://localhost:8765/api/load_data -H \"Content-Type: application/json\" -d '{}')",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); p=d['data']['projects'][0]; print\\('有storyboards:', 'storyboards' in p\\); print\\('镜头数:', len\\(p.get\\('storyboards',[]\\)\\)\\); print\\('镜头名:', p['storyboards'][0]['shotName'] if p.get\\('storyboards'\\) else '无'\\)\")",
+      "Bash(curl -s -X POST http://localhost:8765/api/sync_data -H 'Content-Type: application/json; charset=utf-8' --data-binary '{\"projects\":[{\"id\":\"test_001\",\"name\":\"Test\",\"displayName\":\"Test\",\"script\":\"\",\"characters\":[],\"props\":[],\"scenes\":[],\"storyboards\":[{\"id\":\"sb1\",\"shotNumber\":1,\"shotName\":\"Shot 1\",\"sceneRef\":\"Scene 1\",\"description\":\"Test description\",\"characters\":[\"Char1\"],\"dialogue\":\"Hello\",\"camera\":\"Fixed\",\"duration\":3,\"imagePrompt\":\"\",\"currentImage\":null,\"images\":[],\"createdAt\":1000}],\"prompt\":\"\"}],\"settings\":{}}')"
+    ]
+  }
+}

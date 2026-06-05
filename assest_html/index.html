@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <title>资产库管理系统</title>
+    <link rel="stylesheet" href="styles.css?v=20260606c">
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Noto+Sans+SC:wght@300;400;500;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div id="app">
+        <header class="header">
+            <div class="header-left">
+                <button id="backBtn" class="back-btn-header" style="display:none;" onclick="App.navigateBack()">← 返回</button>
+                <div class="logo">
+                    <span class="logo-icon">◆</span>
+                    <span class="logo-text">资产库</span>
+                </div>
+            </div>
+            <div class="header-actions">
+                <button id="themeToggle" class="btn-icon" title="切换主题">
+                    <svg id="sunIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="5"></circle>
+                        <line x1="12" y1="1" x2="12" y2="3"></line>
+                        <line x1="12" y1="21" x2="12" y2="23"></line>
+                        <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+                        <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+                        <line x1="1" y1="12" x2="3" y2="12"></line>
+                        <line x1="21" y1="12" x2="23" y2="12"></line>
+                        <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+                        <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+                    </svg>
+                    <svg id="moonIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none;">
+                        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+                    </svg>
+                </button>
+                <button id="settingsBtn" class="btn-primary btn-small">
+                    <span>⚙</span>
+                    <span>设置</span>
+                </button>
+            </div>
+        </header>
+
+        <main id="mainContent" class="main-content">
+        </main>
+    </div>
+
+    <div id="modalOverlay" class="modal-overlay">
+        <div id="modalContent" class="modal"></div>
+    </div>
+
+    <script src="utils/storage.js?v=20260604h"></script>
+    <script src="utils/api.js?v=20260604h"></script>
+    <script src="modules/home.js?v=20260606b"></script>
+    <script src="modules/project.js?v=20260604h"></script>
+    <script src="modules/script.js?v=20260606c"></script>
+    <script src="modules/character.js?v=20260606c"></script>
+    <script src="modules/propsscenes.js?v=20260606c"></script>
+    <script src="modules/storyboard.js?v=20260606c"></script>
+    <script src="modules/settings.js?v=20260604h"></script>
+    <script src="app.js?v=20260606c"></script>
+</body>
+</html>
