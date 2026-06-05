@@ -140,7 +140,7 @@ const StoryboardModule = {
                     <button class="btn-ghost btn-tiny" onclick="StoryboardModule.uploadFourGrid('${g.id}')">📁 上传</button>
                     ${fgHistCount > 0 ? `<button class="btn-ghost btn-tiny" title="查看本组历次生成的四宫格图并切换" onclick="StoryboardModule.showFourGridHistory('${g.id}')">📜 历史(${fgHistCount})</button>` : ''}
                 </div>
-                ${errMsg && !genning ? this._fgErrorTag(errMsg) : ''}
+                ${errMsg && !genning ? this._fgErrorTag(errMsg, g.id) : ''}
             </div>
             <div class="list-row-body">
                 <div class="list-row-header">
@@ -311,8 +311,35 @@ const StoryboardModule = {
 
     _singleImgErrorTag(gid, msg) {
         const full = encodeURIComponent(String(msg || ''));
-        const brief = String(msg || '').replace(/\s+/g, ' ').slice(0, 22);
-        return `<div class="gen-err-tag" title="点击查看完整错误" onclick="StoryboardModule.showFgError('${full}')">⚠️ ${this.esc(brief)}${String(msg).length > 22 ? '…' : ''}</div>`;
+        const brief = String(msg || '').replace(/\s+/g, ' ').slice(0, 14);
+        return `<div class="gen-err-tag" title="点击查看完整错误" onclick="StoryboardModule.showFgError('${full}')">`
+            + `<span class="gen-err-txt">⚠️ ${this.esc(brief)}${String(msg).length > 14 ? '…' : ''}</span>`
+            + `<span class="gen-err-x" title="忽略" onclick="event.stopPropagation();StoryboardModule.clearImgError('${gid}')">✕</span>`
+            + `</div>`;
+    },
+
+    // × 关闭：清除单图生成错误
+    clearImgError(gid) {
+        if (!gid) return;
+        const p = Storage.getProject(this.projectId);
+        const g = (p.storyboardGroups || []).find(x => String(x.id) === String(gid));
+        if (g && g.imageError) {
+            delete g.imageError;
+            Storage.updateProject(this.projectId, { storyboardGroups: p.storyboardGroups });
+        }
+        this.render(this.projectId);
+    },
+
+    // × 关闭：清除四宫格生成错误
+    clearFgError(gid) {
+        if (!gid) return;
+        const p = Storage.getProject(this.projectId);
+        const g = (p.storyboardGroups || []).find(x => String(x.id) === String(gid));
+        if (g && g.fourGridError) {
+            delete g.fourGridError;
+            Storage.updateProject(this.projectId, { storyboardGroups: p.storyboardGroups });
+        }
+        this.render(this.projectId);
     },
 
     removeRefImage(gid, mid) {
@@ -1363,6 +1390,8 @@ const StoryboardModule = {
                 fourGridImageId: null,
                 panelImages: [null, null, null, null],   // mediaLibrary id（切分后的 4 张）
                 panelAudios: [null, null, null, null],    // mediaLibrary id（4 句配音）
+                selected: false,                          // CC 生成完默认不选中（单分镜「合成视频」不勾）
+                panelSelected: [false, false, false, false], // 四宫格每个 panel 默认不选中
             });
         }
         Storage.updateProject(this.projectId, { storyboardGroups: groups, storyboardPersons: person });
@@ -1477,11 +1506,14 @@ const StoryboardModule = {
         return sizes.map(s => `<option value="${s.v}" ${s.v === sel ? 'selected' : ''}>${s.l}</option>`).join('');
     },
 
-    // 四宫格错误小标签（点击查看完整错误）
-    _fgErrorTag(msg) {
+    // 四宫格错误小标签（点击查看完整错误，× 可关闭）
+    _fgErrorTag(msg, gid) {
         const full = encodeURIComponent(String(msg || ''));
-        const brief = String(msg || '').replace(/\s+/g, ' ').slice(0, 22);
-        return `<div class="gen-err-tag" title="点击查看完整错误" onclick="StoryboardModule.showFgError('${full}')">⚠️ 生成失败：${this.esc(brief)}${String(msg).length > 22 ? '…' : ''}</div>`;
+        const brief = String(msg || '').replace(/\s+/g, ' ').slice(0, 14);
+        return `<div class="gen-err-tag" title="点击查看完整错误" onclick="StoryboardModule.showFgError('${full}')">`
+            + `<span class="gen-err-txt">⚠️ ${this.esc(brief)}${String(msg).length > 14 ? '…' : ''}</span>`
+            + (gid ? `<span class="gen-err-x" title="忽略" onclick="event.stopPropagation();StoryboardModule.clearFgError('${gid}')">✕</span>` : '')
+            + `</div>`;
     },
 
     showFgError(enc) {

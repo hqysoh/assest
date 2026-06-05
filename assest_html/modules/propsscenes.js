@@ -28,12 +28,12 @@ const PropsScenesModule = {
                     <div class="drop-add-overlay"><span class="drop-add-plus">＋</span><span class="drop-add-text">松开上传图片</span></div>
                 </div>
                 ${img ? `<span class="gen-img-label">${pd}</span>` : ''}
+                ${(!genTask && i.lastGenError) ? CharacterModule.genErrorTag(i.lastGenError, `PropsScenesModule.clearGenError('${i.id}')`) : ''}
                 <div class="list-img-btns">
                     <button class="btn-ghost btn-tiny ${genTask ? 'btn-disabled' : ''}" id="genCardBtn_${i.id}" onclick="${genTask ? '' : `PropsScenesModule.genImg('${i.id}')`}">${genTask ? '⏳ 生成' : '🎨 生成'}</button>
                     <button class="btn-ghost btn-tiny" onclick="PropsScenesModule.upload('${i.id}')">📁 上传</button>
                     <button class="btn-ghost btn-tiny" onclick="PropsScenesModule.showHist('${i.id}')">📷 历史</button>
                 </div>
-                ${(!genTask && i.lastGenError) ? CharacterModule.genErrorTag(i.lastGenError) : ''}
             </div>
             <div class="list-row-body">
                 <div class="list-row-header">
@@ -171,6 +171,19 @@ const PropsScenesModule = {
         const group = (this._genGroups || []).find(g => g.id === gid);
         const sel = document.getElementById('genModel');
         sel.innerHTML = (group && group.models ? group.models : ['dall-e-3']).map(m => `<option value="${m}">${m}</option>`).join('');
+    },
+
+    // × 关闭：清除该道具/场景的生成错误并重渲染
+    clearGenError(iid) {
+        if (!iid) return;
+        const p = Storage.getProject(this.projectId);
+        if (!p) return;
+        const i = (p[this.type] || []).find(x => String(x.id) === String(iid));
+        if (i && i.lastGenError) {
+            delete i.lastGenError;
+            Storage.saveProject(p);
+        }
+        this.render(this.projectId, this.type);
     },
 
     esc(t) { const d = document.createElement('div'); d.textContent = t || ''; return d.innerHTML; }

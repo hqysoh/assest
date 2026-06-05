@@ -173,17 +173,34 @@ const CharacterModule = {
     },
     _genUICallbacks: {},
 
-    // 图像生成错误小标签（点击查看完整错误）；info 经过编码避免引号/换行破坏属性
-    genErrorTag(msg) {
+    // 图像生成错误小标签（点击查看完整错误，× 可关闭，宽度跟随图像 124px 单行省略）
+    // clearCall：× 按钮的清除表达式（如 "CharacterModule.clearGenError('id')"），不同模块各传各的
+    genErrorTag(msg, clearCall) {
         const full = encodeURIComponent(String(msg || ''));
-        const brief = String(msg || '').replace(/\s+/g, ' ').slice(0, 18);
-        return `<div class="gen-err-tag" title="点击查看完整错误" onclick="CharacterModule.showGenError('${full}')">⚠️ 生成失败：${this.esc(brief)}${String(msg).length > 18 ? '…' : ''}</div>`;
+        const brief = String(msg || '').replace(/\s+/g, ' ').slice(0, 14);
+        return `<div class="gen-err-tag" title="点击查看完整错误" onclick="CharacterModule.showGenError('${full}')">`
+            + `<span class="gen-err-txt">⚠️ ${this.esc(brief)}${String(msg).length > 14 ? '…' : ''}</span>`
+            + (clearCall ? `<span class="gen-err-x" title="忽略" onclick="event.stopPropagation();${clearCall}">✕</span>` : '')
+            + `</div>`;
     },
 
     // 弹出完整错误信息（应用内弹窗，兼容 IDE WebView）
     showGenError(enc) {
         const msg = decodeURIComponent(enc || '');
         App.confirm({ title: '❌ 图像生成失败', message: msg || '未知错误', okText: '知道了', cancelText: '关闭' });
+    },
+
+    // × 关闭：清除该卡片的生成错误并重渲染
+    clearGenError(cid) {
+        if (!cid) return;
+        const p = Storage.getProject(this.projectId);
+        if (!p) return;
+        const c = (p.characters || []).find(x => String(x.id) === String(cid));
+        if (c && c.lastGenError) {
+            delete c.lastGenError;
+            Storage.saveProject(p);
+        }
+        this.render(this.projectId);
     },
 
     render(projectId) {
@@ -228,12 +245,12 @@ const CharacterModule = {
                     <div class="drop-add-overlay"><span class="drop-add-plus">＋</span><span class="drop-add-text">松开上传图片</span></div>
                 </div>
                 ${img ? `<span class="gen-img-label">${dimInfo}</span>` : ''}
+                ${(!genTask && c.lastGenError) ? this.genErrorTag(c.lastGenError, `CharacterModule.clearGenError('${c.id}')`) : ''}
                 <div class="list-img-btns">
                     <button class="btn-ghost btn-tiny ${genTask ? 'btn-disabled' : ''}" id="genCardBtn_${c.id}" onclick="${genTask ? '' : `CharacterModule.generateImage('${c.id}')`}">${genTask ? '⏳ 生成' : '🎨 生成'}</button>
                     <button class="btn-ghost btn-tiny" onclick="CharacterModule.uploadImage('${c.id}')">📁 上传</button>
                     <button class="btn-ghost btn-tiny" onclick="CharacterModule.showHistoryModal('${c.id}')">📷 历史</button>
                 </div>
-                ${(!genTask && c.lastGenError) ? this.genErrorTag(c.lastGenError) : ''}
             </div>
             <div class="list-row-body">
                 <div class="list-row-header">

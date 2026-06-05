@@ -759,12 +759,35 @@ def comfy_run_and_wait(workflow, want_kinds=('gifs', 'images', 'audio'), max_wai
             history = hr.json()
             if prompt_id not in history:
                 continue
-            outputs = history[prompt_id].get('outputs', {})
+            entry = history[prompt_id]
+            status = entry.get('status', {}) or {}
+            status_str = status.get('status_str', '')
+            completed = status.get('completed', False)
+            # 工作流执行报错：直接抛出节点报错信息（避免误报“未产出音频”）
+            if status_str == 'error':
+                msgs = []
+                for m in status.get('messages', []) or []:
+                    if isinstance(m, (list, tuple)) and len(m) >= 2 and m[0] in ('execution_error', 'execution_interrupted'):
+                        d = m[1] or {}
+                        em = d.get('exception_message') or d.get('exception_type') or ''
+                        node = d.get('node_type') or d.get('node_id') or ''
+                        if em:
+                            msgs.append(f'{node}: {em}' if node else em)
+                raise RuntimeError('ComfyUI 工作流执行失败：' + ('; '.join(msgs) if msgs else status_str))
+            # 必须等到任务真正完成（completed=True 或已落出 outputs）才收集产物，
+            # 否则 history 刚排队就返回会误判为“无产出”。
+            outputs = entry.get('outputs', {})
+            if not completed and not outputs:
+                continue
             for nid, odata in outputs.items():
                 for key in want_kinds:
                     if key in odata and odata[key]:
                         found[key] = odata[key]
-            return found, prompt_id
+            # 已完成但想要的 kind 还没出现，再多等一轮（PreviewAudio 落盘可能稍晚）
+            if completed or found:
+                return found, prompt_id
+        except RuntimeError:
+            raise
         except Exception:
             continue
     return found, prompt_id
@@ -830,17 +853,29 @@ def run_tts_clone_sync(params):
         if found.get(key):
             item = found[key][0]; break
     if not item:
-        return {'success': False, 'error': '克隆未产出音频'}
-    content = comfy_fetch_view(item.get('filename', ''), item.get('subfolder', ''), item.get('type', 'output'))
-    if not content:
-        # 退化：从 temp 目录找
+        return {'success': False, 'error': '克隆未产出音频（工作流已结束但无音频输出，请检查 PreviewAudio 节点）'}
+    fn = item.get('filename', '')
+    sf = item.get('subfolder', '')
+    # 1) 先按 item 自带 type 取（PreviewAudio 通常是 temp），失败再依次试 temp/output
+    content = None
+    for ft in [item.get('type', 'temp'), 'temp', 'output']:
+        content = comfy_fetch_view(fn, sf, ft)
+        if content:
+            break
+    # 2) 仍失败：直接读本地 ComfyUI 的 temp / output 目录
+    if not content and fn:
         dirs = find_comfyui_dirs()
-        if dirs.get('temp') and item.get('filename'):
-            fp = os.path.join(dirs['temp'], item['filename'])
+        for dkey in ('temp', 'output'):
+            d = dirs.get(dkey)
+            if not d:
+                continue
+            fp = os.path.join(d, sf, fn) if sf else os.path.join(d, fn)
             if os.path.exists(fp):
-                with open(fp, 'rb') as f: content = f.read()
+                with open(fp, 'rb') as f:
+                    content = f.read()
+                break
     if not content:
-        return {'success': False, 'error': '无法取回克隆音频文件'}
+        return {'success': False, 'error': '无法取回克隆音频文件（文件名 %s）' % (fn or '?')}
     return {'success': True, 'audio_base64': base64.b64encode(content).decode('utf-8'), 'mime': 'audio/wav'}
 
 
