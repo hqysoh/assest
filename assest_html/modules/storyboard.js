@@ -2686,13 +2686,15 @@ const StoryboardModule = {
                 }
 
                 if (isBodyDrag && kind === 'aud') {
-                    // ===== 音频移位：拖动时平滑自由跟随鼠标（允许临时重叠，不吸附，避免跳变）=====
-                    // 松手时（onUp）再做一次防重叠吸附落位，落位带平滑动画。
-                    clip.start = Math.max(0, orig.start + dFrames);
+                    // ===== 音频移位：拖动时实时避让，互不重叠；接近对齐点时显示一条对齐辅助线 =====
+                    const want = Math.max(0, orig.start + dFrames);
+                    const placed = self._snapAudioAvoid(clip, want);   // 实时夹到不重叠位置
+                    clip.start = placed;
                     self._renderTracks();
-                    // 给正在拖动的块加高亮，提示「松手后会自动避让对齐」
                     const cur = document.querySelector(`.sb-dir-clip[data-kind="aud"][data-uid="${uid}"]`);
                     if (cur) cur.classList.add('sb-dir-aud-dragging');
+                    // 落点与相邻音频边缘对齐 → 显示竖向辅助线
+                    self._showAudioAlignLine(clip);
                     return;
                 }
 
@@ -2736,6 +2738,7 @@ const StoryboardModule = {
                 document.removeEventListener('mouseup', onUp);
                 document.body.classList.remove('sb-dir-dragging-cursor');
                 self._clearDropIndicator();
+                self._clearAudioAlignLine();
                 if (isImgReorder && moved && dropTarget != null) {
                     // 图像：松手才真正落位 → 移到目标索引 → relayout → 重绘（带平滑过渡）
                     const from = arr.findIndex(c => c.uid === uid);
@@ -2745,11 +2748,9 @@ const StoryboardModule = {
                     self._relayoutImages();
                     self._tl._animateNext = true;
                 } else if (isBodyDrag && kind === 'aud' && moved) {
-                    // 音频：拖动时自由跟随（可能临时重叠），松手时一次性吸附避让到不重叠位置，
-                    // 再按 start 排序保持视觉顺序，启用平滑落位动画（不会瞬移跳变）。
-                    clip.start = self._snapAudioAvoid(clip, clip.start);
+                    // 音频：拖动时已实时避让不重叠（onMove 里 _snapAudioAvoid），
+                    // 松手只需按 start 重排数组顺序即可，不再二次吸附（避免落位跳变）。
                     self._reorderAudioByStart(uid);
-                    self._tl._animateNext = true;
                 }
                 // 未发生拖动 = 视为「点击」：图像段则选中并在预览区展示
                 if (isBodyDrag && !moved && kind === 'img') self._tl.selectedUid = uid;
@@ -2813,6 +2814,37 @@ const StoryboardModule = {
     _clearDropIndicator() {
         const host = document.getElementById('sbDirTracks');
         const line = host && host.querySelector('.sb-dir-drop-line');
+        if (line) line.remove();
+    },
+
+    // 拖动音频时：若该块的左/右边缘正好贴合相邻音频边缘或图像段边界，显示一条竖向对齐线
+    _showAudioAlignLine(clip) {
+        const host = document.getElementById('sbDirTracks');
+        if (!host) return;
+        const tl = this._tl;
+        const ppf = tl.pxPerFrame;
+        const TOL = 1;   // 已经吸附贴合，容差取 1 帧
+        // 收集所有可对齐的边界帧：其它音频段两端 + 图像段两端
+        const edges = [];
+        tl.audioClips.forEach(c => { if (c.uid !== clip.uid) { edges.push(c.start); edges.push(c.start + c.length); } });
+        tl.imageClips.forEach(c => { edges.push(c.start); edges.push(c.start + c.length); });
+        const myL = clip.start, myR = clip.start + clip.length;
+        let hit = null;
+        for (const ef of edges) {
+            if (Math.abs(myL - ef) <= TOL || Math.abs(myR - ef) <= TOL) { hit = ef; break; }
+        }
+        if (hit == null) { this._clearAudioAlignLine(); return; }
+        let line = host.querySelector('.sb-dir-align-line');
+        if (!line) {
+            line = document.createElement('div');
+            line.className = 'sb-dir-align-line';
+            host.appendChild(line);
+        }
+        line.style.cssText = `left:${Math.round(hit * ppf)}px`;
+    },
+    _clearAudioAlignLine() {
+        const host = document.getElementById('sbDirTracks');
+        const line = host && host.querySelector('.sb-dir-align-line');
         if (line) line.remove();
     },
 
