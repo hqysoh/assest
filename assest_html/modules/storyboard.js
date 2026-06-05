@@ -2588,6 +2588,9 @@ const StoryboardModule = {
             const rect = ruler2.getBoundingClientRect();
             this.tlSeekFrame(Math.round((e.clientX - rect.left) / ppf));
         };
+        // 播放头（红线）可左右拖动
+        const ph = host.querySelector('.sb-dir-playhead');
+        if (ph) this._bindPlayheadDrag(ph);
         // 落位动画：换位松手后，让所有片段对 left 做一次平滑过渡
         if (tl._animateNext) {
             tl._animateNext = false;
@@ -2965,16 +2968,86 @@ const StoryboardModule = {
     tlSeekFrame(f) {
         const tl = this._tl;
         tl.playFrame = Math.max(0, Math.min(Math.round(parseFloat(f)) || 0, tl.totalFrames));
+        const px = Math.round(tl.playFrame * tl.pxPerFrame);
         const ph = document.getElementById('tlPlayhead');
-        if (ph) ph.style.left = Math.round(tl.playFrame * tl.pxPerFrame) + 'px';
+        if (ph) ph.style.left = px + 'px';
         const seek = document.getElementById('tlSeek');
         if (seek && +seek.value !== tl.playFrame) seek.value = tl.playFrame;
         const cur = document.getElementById('tlCur');
         if (cur) cur.textContent = (tl.playFrame / tl.fps).toFixed(2) + 's';
+        this._ensurePlayheadVisible(px);   // 红线超出可视区 → 滚动画面跟随
         // 播放中：仅换画面（不重建提示词输入框）；手动定位/暂停：完整刷新
         if (tl.playing) this._updateStage(); else this._updatePreview();
         this._syncAudioToFrame();
     },
+
+    // 让播放头（位于 px 处）始终落在轨道滚动容器的可见范围内：
+    // 超出右边界 → 向右滚动；超出左边界 → 向左滚动，并各留一段边距。
+    _ensurePlayheadVisible(px) {
+        const scroll = document.querySelector('.sb-dir-scroll');
+        if (!scroll) return;
+        const view = scroll.clientWidth;
+        const margin = Math.min(80, view * 0.15);   // 可视区两侧的安全边距
+        const left = scroll.scrollLeft;
+        const right = left + view;
+        if (px > right - margin) {
+            scroll.scrollLeft = Math.max(0, px - view + margin);
+        } else if (px < left + margin) {
+            scroll.scrollLeft = Math.max(0, px - margin);
+        }
+    },
+
+    // 播放头（红线）拖拽：按鼠标 x 映射到帧并 seek（进度条随之联动、画面自动滚动跟随）。
+    // 拖动期间若指针靠近滚动容器左右边缘，自动持续滚动，便于拖到很长的时间轴远处。
+    _bindPlayheadDrag(ph) {
+        const self = this;
+        const onDown = (e) => {
+            e.preventDefault(); e.stopPropagation();
+            const tracks = document.getElementById('sbDirTracks');
+            const scroll = document.querySelector('.sb-dir-scroll');
+            if (!tracks) return;
+            // 拖动时若正在播放，先暂停，避免帧推进与手动拖动打架
+            if (self._tl && self._tl.playing) self.tlTogglePlay();
+            ph.classList.add('sb-dir-ph-drag');
+            document.body.classList.add('sb-dir-ph-cursor');
+            let edgeTimer = null;
+            const seekAt = (clientX) => {
+                const rect = tracks.getBoundingClientRect();
+                const ppf = self._tl.pxPerFrame;
+                self.tlSeekFrame(Math.round((clientX - rect.left) / ppf));
+            };
+            const onMove = (ev) => {
+                seekAt(ev.clientX);
+                // 指针接近滚动容器边缘 → 持续滚动（拖到远处也能跟）
+                if (edgeTimer) { clearInterval(edgeTimer); edgeTimer = null; }
+                if (scroll) {
+                    const r = scroll.getBoundingClientRect();
+                    const EDGE = 36;
+                    let dir = 0;
+                    if (ev.clientX > r.right - EDGE) dir = 1;
+                    else if (ev.clientX < r.left + EDGE) dir = -1;
+                    if (dir) {
+                        const lastX = ev.clientX;
+                        edgeTimer = setInterval(() => {
+                            scroll.scrollLeft = Math.max(0, scroll.scrollLeft + dir * 24);
+                            seekAt(lastX);
+                        }, 30);
+                    }
+                }
+            };
+            const onUp = () => {
+                document.removeEventListener('mousemove', onMove);
+                document.removeEventListener('mouseup', onUp);
+                if (edgeTimer) clearInterval(edgeTimer);
+                ph.classList.remove('sb-dir-ph-drag');
+                document.body.classList.remove('sb-dir-ph-cursor');
+            };
+            document.addEventListener('mousemove', onMove);
+            document.addEventListener('mouseup', onUp);
+        };
+        ph.addEventListener('mousedown', onDown);
+    },
+
     tlTogglePlay() {
         const tl = this._tl;
         tl.playing = !tl.playing;

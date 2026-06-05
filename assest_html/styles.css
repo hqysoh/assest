@@ -813,9 +813,14 @@ border-radius:12px;padding:16px;box-shadow:0 12px 40px rgba(0,0,0,.5)}
 .sb-dir-handle.r{right:0;border-right:2px solid rgba(255,255,255,.35)}
 .sb-dir-handle:hover{background:rgba(124,130,255,.5)}
 
-/* 播放头 */
-.sb-dir-playhead{position:absolute;top:0;bottom:0;width:2px;background:#ff4d4f;box-shadow:0 0 6px #ff4d4f;pointer-events:none;z-index:5}
-.sb-dir-playhead::before{content:'';position:absolute;top:0;left:-4px;border-left:5px solid transparent;border-right:5px solid transparent;border-top:7px solid #ff4d4f}
+/* 播放头（红线）：可左右拖动定位 */
+.sb-dir-playhead{position:absolute;top:0;bottom:0;width:2px;background:#ff4d4f;box-shadow:0 0 6px #ff4d4f;z-index:6;cursor:ew-resize}
+/* 顶部三角把手：放大可抓取热区，覆盖标尺区域 */
+.sb-dir-playhead::before{content:'';position:absolute;top:0;left:-7px;border-left:8px solid transparent;border-right:8px solid transparent;border-top:11px solid #ff4d4f;cursor:ew-resize}
+/* 不可见的加宽热区，方便用鼠标抓住细线拖动 */
+.sb-dir-playhead::after{content:'';position:absolute;top:0;bottom:0;left:-6px;width:14px;cursor:ew-resize}
+.sb-dir-playhead.sb-dir-ph-drag{background:#ff7875;box-shadow:0 0 10px #ff4d4f}
+body.sb-dir-ph-cursor{cursor:ew-resize !important}
 
 /* 走带控制 */
 .sb-dir-transport{display:flex;align-items:center;gap:0.6rem;margin-top:0.7rem}
