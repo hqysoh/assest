@@ -3257,8 +3257,21 @@ const StoryboardModule = {
     async genVideo() {
         const tl = this._tl;
         if (!tl || !tl.imageClips.length) { App.showToast('请至少保留一个图像段', 'error'); return; }
-        // 生成中禁止再次发起，直到完成/失败/打断结束
-        if (this._loadVideoTask()) { App.showToast('已有视频生成任务进行中，请等待完成或先打断', 'info'); return; }
+        // 生成中禁止再次发起，直到完成/失败/打断结束。
+        // 但本地可能残留「陈旧任务」（如后端重启过）—— 先向后端核实是否仍存活，
+        // 已失效（missing / 查询失败）则清掉本地任务并放行，避免永久卡住无法再生成。
+        const existing = this._loadVideoTask();
+        if (existing) {
+            let alive = false;
+            try {
+                const r = await API.post('/api/sb_task', { task_id: existing.task_id });
+                alive = r && r.success && ['pending', 'running'].includes(r.status);
+            } catch (e) { alive = false; }
+            if (alive) { App.showToast('已有视频生成任务进行中，请等待完成或先打断', 'info'); return; }
+            // 任务已不存在/已结束 → 清理残留，继续发起新任务
+            this._clearVideoTask(); this._stopVideoTimer(); this._videoPolling = null;
+            this._syncVideoUI();
+        }
         if (tl.playing) this.tlTogglePlay();
         const resEl = document.getElementById('tlVideoResult');
         // 新一次生成：清掉上次失败横幅
