@@ -3340,8 +3340,29 @@ const StoryboardModule = {
         if (!ok || !this._loadVideoTask()) return;
         const btn = document.getElementById('tlCancelBtn');
         if (btn) { btn.disabled = true; btn.textContent = '⏹ 打断中…'; }
-        try { await API.post('/api/sb_cancel', { task_id: t.task_id }); } catch (e) {}
-        // 轮询会收到 cancelled 状态并收尾；此处不直接清任务，交给 _pollVideoTask 统一处理
+        let r = null;
+        try {
+            r = await API.post('/api/sb_cancel', { task_id: t.task_id });
+        } catch (e) {
+            r = null;   // 网络错误 / 接口不存在（旧后端 404）
+        }
+        if (r && r.success) {
+            // 后端已受理打断：主动停轮询并立即收尾（不必干等下一轮），ComfyUI 会被真实中断
+            this._videoPolling = null;
+            this._clearVideoTask(); this._stopVideoTimer();
+            const resEl = document.getElementById('tlVideoResult');
+            if (resEl) resEl.innerHTML = '<div class="sb-dir-cur">⏹ 已打断本次生成</div>';
+            this._syncVideoUI();
+            App.showToast('⏹ 已打断视频生成', 'info');
+        } else {
+            // 后端无打断接口或调用失败 → 前端停止跟踪以恢复可用（提示用户后端可能需重启）
+            this._videoPolling = null;
+            this._clearVideoTask(); this._stopVideoTimer();
+            const resEl = document.getElementById('tlVideoResult');
+            if (resEl) resEl.innerHTML = '<div class="sb-dir-cur">⏹ 已停止跟踪（后端打断接口不可用，后台任务可能仍在运行，请重启后端以启用真实打断）</div>';
+            this._syncVideoUI();
+            App.showToast('⚠️ 后端打断接口不可用，已前端停止跟踪。请重启后端启用真实打断', 'error');
+        }
     },
 
     // 视频生成计时器：每秒刷新「生成中 Ns」（弹窗开着才更新 DOM）
