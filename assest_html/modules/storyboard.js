@@ -2722,10 +2722,9 @@ const StoryboardModule = {
                 }
 
                 if (isBodyDrag && kind === 'aud') {
-                    // ===== 音频移位：拖动时实时避让，互不重叠；接近对齐点时显示一条对齐辅助线 =====
+                    // ===== 音频移位：拖动中自由跟随鼠标（允许暂时重叠），松手时才避让不重叠 =====
                     const want = Math.max(0, orig.start + dFrames);
-                    const placed = self._snapAudioAvoid(clip, want);   // 实时夹到不重叠位置
-                    clip.start = placed;
+                    clip.start = want;                  // 跟手，不做避让
                     self._renderTracks();
                     const cur = document.querySelector(`.sb-dir-clip[data-kind="aud"][data-uid="${uid}"]`);
                     if (cur) cur.classList.add('sb-dir-aud-dragging');
@@ -2784,8 +2783,10 @@ const StoryboardModule = {
                     self._relayoutImages();
                     self._tl._animateNext = true;
                 } else if (isBodyDrag && kind === 'aud' && moved) {
-                    // 音频：拖动时已实时避让不重叠（onMove 里 _snapAudioAvoid），
-                    // 松手只需按 start 重排数组顺序即可，不再二次吸附（避免落位跳变）。
+                    // 音频：拖动中允许自由重叠跟手；松手这一刻才做避让，
+                    // 按拖动落点把自己错开到不与其它音频段重叠的位置，再按 start 重排。
+                    // 用拖动起点 orig.start 作为方向参考，决定碰撞时贴向左侧还是右侧。
+                    clip.start = self._snapAudioAvoid(clip, clip.start, orig.start);
                     self._reorderAudioByStart(uid);
                 }
                 // 未发生拖动 = 视为「点击」：图像段则选中并在预览区展示
@@ -2891,11 +2892,13 @@ const StoryboardModule = {
 
     // 快速拖动时的磁吸避让：把目标 start 夹到不与其它音频段重叠的位置。
     // 按拖动方向把自己贴到碰撞段的外侧边界（碰到别的段就停下，不穿过）。慢速拖动不调用此方法（允许重叠）。
-    _snapAudioAvoid(clip, ns) {
+    _snapAudioAvoid(clip, ns, fromStart) {
         const len = clip.length;
         const others = this._tl.audioClips.filter(c => c.uid !== clip.uid);
         if (!others.length) return Math.max(0, ns);
-        const movingRight = ns > clip.start;     // 拖动方向
+        // 方向参考：松手避让时传 fromStart（拖动起点）；否则用当前 start
+        const ref = (fromStart == null) ? clip.start : fromStart;
+        const movingRight = ns >= ref;           // 拖动方向
         let s = Math.max(0, ns);
         for (let iter = 0; iter < others.length + 1; iter++) {
             let collided = false;
@@ -3442,6 +3445,32 @@ const StoryboardModule = {
         tick();
     },
 
+    // 用 Web Audio 合成一段轻快的「叮—咚」提示音（无需音频文件）。
+    // 视频生成成功后播放，提醒用户回来查看结果。
+    _playDoneChime() {
+        try {
+            const Ctx = window.AudioContext || window.webkitAudioContext;
+            if (!Ctx) return;
+            const ctx = new Ctx();
+            const now = ctx.currentTime;
+            // 两个上行音符：C6 → E6，营造「完成」感
+            const notes = [{ f: 1047, t: 0 }, { f: 1319, t: 0.16 }];
+            notes.forEach(({ f, t }) => {
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.value = f;
+                const s = now + t;
+                gain.gain.setValueAtTime(0.0001, s);
+                gain.gain.exponentialRampToValueAtTime(0.25, s + 0.02);
+                gain.gain.exponentialRampToValueAtTime(0.0001, s + 0.35);
+                osc.connect(gain); gain.connect(ctx.destination);
+                osc.start(s); osc.stop(s + 0.4);
+            });
+            setTimeout(() => { try { ctx.close(); } catch (e) {} }, 1000);
+        } catch (e) { /* 忽略：浏览器不支持或被策略拦截 */ }
+    },
+
     _onVideoDone(result) {
         this._clearVideoTask(); this._stopVideoTimer(); this._videoPolling = null;
         this._syncVideoUI();
@@ -3451,6 +3480,8 @@ const StoryboardModule = {
             resEl.innerHTML = `<video class="sb-result-video" controls autoplay src="${dataUrl}"></video>
                 <div class="sb-dir-cur" style="margin-top:.5rem">✅ 生成成功（${result.frames || 0} 帧）。右键视频可保存。</div>`;
             const btn = document.getElementById('tlGenBtn'); if (btn) btn.textContent = '🔄 重新生成';
+            this._playDoneChime();                          // 成功提示音
+            App.showToast('🎬 视频生成完成', 'success');     // 配合弹窗已关时也有反馈
         } else if (!result.video_base64) {
             this._saveVideoErr('视频生成失败：未产出视频');
             this._renderVideoErrBanner();

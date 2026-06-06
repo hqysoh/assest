@@ -1081,7 +1081,7 @@ def run_director_sync(params, task_id=None):
 
     try:
         found, _ = comfy_run_and_wait(
-            workflow, want_kinds=('gifs', 'images', 'audio'), max_wait=1200,
+            workflow, want_kinds=('gifs', 'images', 'audio'), max_wait=3600,
             on_prompt_id=(lambda pid: _sb_job_set(task_id, prompt_id=pid)) if task_id else None,
             should_cancel=(lambda: _sb_job_cancelled(task_id)) if task_id else None,
         )
