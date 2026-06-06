@@ -1063,9 +1063,9 @@ def run_director_sync(params, task_id=None):
 
     timeline_data = json.dumps({'segments': timeline_segments, 'audioSegments': audio_segments}, ensure_ascii=False)
 
-    # 注入 LTXDirector 节点
+    # 注入 LTXDirector 节点（兼容改名后的 LTXDirectorPlus 与原版 LTXDirector）
     for nid, node in workflow.items():
-        if node.get('class_type') == 'LTXDirector':
+        if node.get('class_type') in ('LTXDirectorPlus', 'LTXDirector'):
             inp = node['inputs']
             inp['global_prompt'] = params.get('global_prompt', '')
             inp['duration_frames'] = total_frames
@@ -1074,9 +1074,29 @@ def run_director_sync(params, task_id=None):
             # LTXDirector 用竖线 | 分隔各段 local prompt（见节点源码 _encode_relay）
             inp['local_prompts'] = " | ".join((lp or '画面') for lp in local_prompts)
             inp['segment_lengths'] = ",".join(seg_lengths)
-            inp['epsilon'] = float(params.get('epsilon', 0.001))
-            inp['guide_strength'] = str(params.get('guide_strength', '1.00'))
+            # epsilon：段间过渡软硬度。0.001=硬切（动作易僵），调高到 ~0.3 过渡更自然、运动更连贯。
+            inp['epsilon'] = float(params.get('epsilon', 0.3))
+            # guide_strength：每段引导图的约束强度。1.0=把画面钉死在引导图上（动作几乎不变、生硬）。
+            #   这里把每段强度钳制到 max_guide_strength（默认 0.7），即使前端传 1.0 也降下来，给模型留出运动空间。
+            max_gs = float(params.get('max_guide_strength', 0.7))
+            raw_gs = str(params.get('guide_strength', '') or '')
+            if raw_gs.strip():
+                clamped = []
+                for x in raw_gs.split(','):
+                    x = x.strip()
+                    if not x:
+                        continue
+                    try:
+                        clamped.append(f"{min(float(x), max_gs):.2f}")
+                    except ValueError:
+                        clamped.append(f"{max_gs:.2f}")
+                inp['guide_strength'] = ",".join(clamped) if clamped else f"{max_gs:.2f}"
+            else:
+                inp['guide_strength'] = f"{max_gs:.2f}"
             inp['use_custom_audio'] = bool(params.get('use_custom_audio', len(audio_segments) > 0))
+            # audio_env_strength：use_custom_audio 开启时，>0 允许模型在保留上传音频的同时叠加
+            #   prompt 描述的环境音/音效（0.0=严格只用上传音频，保持原行为）。仅当节点支持该输入时生效。
+            inp['audio_env_strength'] = float(params.get('audio_env_strength', 0.0))
             break
 
     try:
