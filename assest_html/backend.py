@@ -920,6 +920,17 @@ def run_tts_clone_sync(params):
     return {'success': True, 'audio_base64': base64.b64encode(content).decode('utf-8'), 'mime': 'audio/wav'}
 
 
+def _convert_ui_workflow_to_api(ui_wf):
+    """尝试把 ComfyUI 网页版「完整工作流」格式转换为 /api/prompt 需要的 API 格式。
+
+    网页版格式的 widgets_values 仅是「纯值数组」，与各参数名的对应关系依赖每个节点
+    类型的 widget 定义顺序（JSON 中未完整保存该映射）。强行按顺序映射会造成参数错位，
+    比直接报错更危险。因此这里不做易错的自动转换，返回 None，由上层给出明确的
+    「请导出 API 格式」提示。（保留此函数便于未来在拿到节点 schema 后实现可靠转换。）
+    """
+    return None
+
+
 def run_director_sync(params, task_id=None):
     """导演台视频生成：上传图像/音频 → 组装 timeline_data → 运行 LTXDirector → 返回视频 base64。
 
@@ -937,6 +948,18 @@ def run_director_sync(params, task_id=None):
         return {'success': False, 'error': '未找到导演台工作流文件'}
     with open(DIRECTOR_WORKFLOW_PATH, 'r', encoding='utf-8') as f:
         workflow = json.load(f)
+
+    # 格式校验：/api/prompt 只接受 API 格式（扁平 {节点id:{class_type,inputs}}）。
+    # 若误存成 ComfyUI 网页版「完整工作流」格式（含 nodes/links 数组、顶层无 class_type），
+    # 这里尝试自动转换；转换失败则明确报错，避免把错误格式发给 ComfyUI 导致「没反应」。
+    if isinstance(workflow, dict) and 'nodes' in workflow and isinstance(workflow.get('nodes'), list):
+        converted = _convert_ui_workflow_to_api(workflow)
+        if converted is None:
+            return {'success': False, 'error': (
+                '导演台工作流是 ComfyUI「网页版完整格式」（含 nodes/links），'
+                '而后端需要「API 格式」。请在 ComfyUI 里用「导出(API)/Save (API Format)」'
+                '重新导出并覆盖 workflow-api/AI代码侠土豆-LTX2.3导演台工作流.json')}
+        workflow = converted
 
     fps = int(params.get('fps', 30))
     timeline_segments = []
