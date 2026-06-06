@@ -832,6 +832,9 @@ body.sb-dir-ph-cursor{cursor:ew-resize !important}
 .sb-dir-guide{font-size:0.72rem;color:var(--t2);font-weight:600;display:inline-flex;align-items:center;gap:0.3rem;white-space:nowrap}
 .sb-dir-guide input[type=number]{width:62px}
 .sb-dir-eps-hint{font-size:0.6rem;color:var(--t3,#888);font-weight:500;white-space:nowrap}
+/* 使用音频开关 */
+.sb-dir-switch{display:inline-flex;align-items:center;gap:0.3rem;cursor:pointer;font-size:0.72rem;color:var(--t2);font-weight:600;white-space:nowrap}
+.sb-dir-switch input[type=checkbox]{width:auto;margin:0;cursor:pointer;accent-color:var(--ac)}
 
 /* 时间轴下方：当前段 local 提示词编辑区（已去掉画面 stage） */
 .sb-dir-preview{margin-top:0.6rem;border:1px solid var(--bd);border-radius:10px;overflow:hidden}

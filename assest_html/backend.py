@@ -1094,9 +1094,6 @@ def run_director_sync(params, task_id=None):
             else:
                 inp['guide_strength'] = f"{max_gs:.2f}"
             inp['use_custom_audio'] = bool(params.get('use_custom_audio', len(audio_segments) > 0))
-            # audio_env_strength：use_custom_audio 开启时，>0 允许模型在保留上传音频的同时叠加
-            #   prompt 描述的环境音/音效（0.0=严格只用上传音频，保持原行为）。仅当节点支持该输入时生效。
-            inp['audio_env_strength'] = float(params.get('audio_env_strength', 0.0))
             break
 
     try:
