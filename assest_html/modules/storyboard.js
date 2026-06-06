@@ -2426,8 +2426,9 @@ const StoryboardModule = {
             fps: this.FPS,
             pxPerFrame: 1.4,                      // 缩放：像素/帧
             globalPrompt: first.globalPrompt || first.prompt || '',
-            guideStrength: '1.00',
-            epsilon: 0.001,                       // 过渡柔和度（0.001 硬切 ~ 1.0 最柔）
+            guideStrength: '0.70',                // 引导强度上限：越低动作越自由（1.0 易僵硬）
+            epsilon: 0.3,                         // 过渡柔和度（0.001 硬切 ~ 1.0 最柔）
+            audioEnvStrength: 0,                  // 环境音强度：0=只用上传音频；>0 让模型叠加 prompt 描述的环境音
             selectedUid: (imageClips[0] && imageClips[0].uid) || null,  // 预览/编辑当前选中的图像段
             playFrame: 0, playing: false,
         };
@@ -2507,15 +2508,21 @@ const StoryboardModule = {
                         <button class="sb-tl-mini" onclick="StoryboardModule.tlZoom(1)">＋</button>
                     </span>
                     <span class="sb-dir-sep"></span>
-                    <span class="sb-dir-guide">Guide Strength
-                        <input type="number" id="tlGuide" min="0" max="2" step="0.05" value="${tl.guideStrength || '1.00'}"
+                    <span class="sb-dir-guide" title="引导强度上限：每段引导图对画面的约束。越低动作越自由，越高越贴近原图但易僵硬。建议 0.5~0.8">引导强度
+                        <input type="number" id="tlGuide" min="0" max="1" step="0.05" value="${tl.guideStrength || '0.70'}"
                             oninput="StoryboardModule.tlSetGuide(this.value)">
+                        <span class="sb-dir-eps-hint">0~1｜越低越敢动</span>
                     </span>
-                    <span class="sb-dir-guide" title="过渡柔和度：越小越硬切、越大越柔和。范围 0.001 ~ 1.0（0.001=硬切, 0.5=平滑, 0.8≈淡入淡出）">
+                    <span class="sb-dir-guide" title="过渡柔和度：越小越硬切、越大越柔和。范围 0.001 ~ 1.0（0.001=硬切, 0.3~0.5=平滑, 0.8≈淡入淡出）">
                         Epsilon
-                        <input type="number" id="tlEpsilon" min="0.001" max="1" step="0.001" value="${(tl.epsilon ?? 0.001)}"
+                        <input type="number" id="tlEpsilon" min="0.001" max="1" step="0.001" value="${(tl.epsilon ?? 0.3)}"
                             oninput="StoryboardModule.tlSetEpsilon(this.value)">
                         <span class="sb-dir-eps-hint">0.001~1.0｜越大越柔</span>
+                    </span>
+                    <span class="sb-dir-guide" title="环境音强度：仅在使用上传音频时生效。0=只用你上传的音频；调到 0.2~0.4 可让模型按提示词叠加环境音/音效（风声、脚步、氛围），同时尽量保留人声">环境音
+                        <input type="number" id="tlAudioEnv" min="0" max="1" step="0.05" value="${tl.audioEnvStrength ?? 0}"
+                            oninput="StoryboardModule.tlSetAudioEnv(this.value)">
+                        <span class="sb-dir-eps-hint">0~1｜0=纯人声</span>
                     </span>
                 </div>
                 <div class="sb-dir-scroll">
@@ -2934,7 +2941,18 @@ const StoryboardModule = {
         this._tl.pxPerFrame = steps[idx];
         this._renderTracks();
     },
-    tlSetGuide(v) { this._tl.guideStrength = String(parseFloat(v) || 1).toFixed(2); },
+    tlSetGuide(v) {
+        let n = parseFloat(v);
+        if (isNaN(n)) n = 0.7;
+        n = Math.max(0, Math.min(1, n));   // 引导强度上限 0~1
+        this._tl.guideStrength = n.toFixed(2);
+    },
+    tlSetAudioEnv(v) {
+        let n = parseFloat(v);
+        if (isNaN(n)) n = 0;
+        n = Math.max(0, Math.min(1, n));   // 环境音强度 0~1
+        this._tl.audioEnvStrength = n;
+    },
     tlSetEpsilon(v) {
         let n = parseFloat(v);
         if (isNaN(n)) n = 0.001;
@@ -3310,9 +3328,11 @@ const StoryboardModule = {
                 audioSegments,
                 total_frames: total,
                 global_prompt: tl.globalPrompt || '',
-                epsilon: (this._tl.epsilon ?? 0.001),
-                guide_strength: tl.guideStrength || '1.00',
+                epsilon: (this._tl.epsilon ?? 0.3),
+                guide_strength: tl.guideStrength || '0.70',
+                max_guide_strength: parseFloat(tl.guideStrength || '0.70'),   // 每段引导强度上限
                 use_custom_audio: audioSegments.length > 0,
+                audio_env_strength: (this._tl.audioEnvStrength ?? 0),          // 环境音混合强度
                 fps: tl.fps,
             });
             if (!submit.success || !submit.task_id) throw new Error(submit.error || '提交失败');
