@@ -64,6 +64,19 @@ def _sb_job_set(task_id, **kw):
             job.update(ts=time.time(), **kw)
 
 
+def _sb_job_cancelled(task_id):
+    """任务是否被请求取消（worker 在轮询中检查此标志以真实打断）。"""
+    with sb_jobs_lock:
+        job = sb_jobs.get(task_id)
+        return bool(job and job.get('cancelled'))
+
+
+def _sb_job_get(task_id):
+    with sb_jobs_lock:
+        job = sb_jobs.get(task_id)
+        return dict(job) if job else None
+
+
 def _submit_sb_job(kind, worker, params):
     """提交一个异步任务，返回 task_id。worker(task_id, params) 在后台线程执行。"""
     _cleanup_sb_jobs()
@@ -743,14 +756,42 @@ def comfy_upload_file(raw_bytes, filename, subfolder=""):
     return (f"{sf}/{name}" if sf else name)
 
 
-def comfy_run_and_wait(workflow, want_kinds=('gifs', 'images', 'audio'), max_wait=600):
-    """提交 workflow 到 ComfyUI 并轮询 history，返回 (outputs_dict, prompt_id)。"""
+class JobCancelled(Exception):
+    """任务被用户主动打断。"""
+    pass
+
+
+def comfy_interrupt():
+    """请求 ComfyUI 中断当前正在执行的任务。"""
+    try:
+        requests.post(f"{COMFYUI_URL}/api/interrupt", timeout=10)
+    except Exception:
+        pass
+
+
+def comfy_run_and_wait(workflow, want_kinds=('gifs', 'images', 'audio'), max_wait=600,
+                       on_prompt_id=None, should_cancel=None):
+    """提交 workflow 到 ComfyUI 并轮询 history，返回 (outputs_dict, prompt_id)。
+
+    on_prompt_id(prompt_id): 拿到 prompt_id 后回调（用于把它记到任务上，便于取消）。
+    should_cancel(): 返回 True 时，调用 ComfyUI interrupt 真实打断并抛出 JobCancelled。
+    """
+    # 提交前若已请求取消，直接放弃
+    if should_cancel and should_cancel():
+        raise JobCancelled()
     resp = requests.post(f"{COMFYUI_URL}/api/prompt", json={"prompt": workflow}, timeout=15)
     if resp.status_code != 200:
         raise RuntimeError(f'ComfyUI 请求失败: {resp.status_code} {resp.text[:200]}')
     prompt_id = resp.json()['prompt_id']
+    if on_prompt_id:
+        try: on_prompt_id(prompt_id)
+        except Exception: pass
     found = {}
     for _ in range(max_wait // 2):
+        # 轮询前检查取消：真实打断 ComfyUI 执行
+        if should_cancel and should_cancel():
+            comfy_interrupt()
+            raise JobCancelled()
         time.sleep(2)
         try:
             hr = requests.get(f"{COMFYUI_URL}/api/history/{prompt_id}", timeout=10)
@@ -879,7 +920,7 @@ def run_tts_clone_sync(params):
     return {'success': True, 'audio_base64': base64.b64encode(content).decode('utf-8'), 'mime': 'audio/wav'}
 
 
-def run_director_sync(params):
+def run_director_sync(params, task_id=None):
     """导演台视频生成：上传图像/音频 → 组装 timeline_data → 运行 LTXDirector → 返回视频 base64。
 
     支持两种入参格式：
@@ -1016,7 +1057,13 @@ def run_director_sync(params):
             break
 
     try:
-        found, _ = comfy_run_and_wait(workflow, want_kinds=('gifs', 'images', 'audio'), max_wait=1200)
+        found, _ = comfy_run_and_wait(
+            workflow, want_kinds=('gifs', 'images', 'audio'), max_wait=1200,
+            on_prompt_id=(lambda pid: _sb_job_set(task_id, prompt_id=pid)) if task_id else None,
+            should_cancel=(lambda: _sb_job_cancelled(task_id)) if task_id else None,
+        )
+    except JobCancelled:
+        return {'success': False, 'cancelled': True, 'error': '已打断'}
     except Exception as e:
         return {'success': False, 'error': str(e)}
     item = None
@@ -1117,6 +1164,7 @@ class Handler(BaseHTTPRequestHandler):
             '/api/storyboard/tts_clone': self.storyboard_tts_clone,    # 异步：Qwen3 语音克隆
             '/api/storyboard/video': self.storyboard_video,            # 异步：导演台视频生成
             '/api/sb_task': self.sb_task_status,                       # 统一查询分镜异步任务
+            '/api/sb_cancel': self.sb_task_cancel,                      # 打断分镜异步任务（真实中断 ComfyUI）
         }
         handler = routes.get(self.path)
         if handler: handler()
@@ -1470,9 +1518,16 @@ class Handler(BaseHTTPRequestHandler):
             has_new = bool(params.get('imageSegments')) or bool(params.get('audioSegments'))
             if not params['segments'] and not has_new:
                 self.send_json({'success': False, 'error': '缺少分镜段'}, 400); return
-            task_id = _submit_sb_job('director',
-                lambda tid, p: _sb_job_set(tid, **(lambda r: {'status': 'done', 'result': r} if r.get('success') else {'status': 'error', 'error': r.get('error')})(run_director_sync(p))),
-                params)
+            def _director_worker(tid, p):
+                _sb_job_set(tid, status='running')
+                r = run_director_sync(p, task_id=tid)
+                if r.get('success'):
+                    _sb_job_set(tid, status='done', result=r)
+                elif r.get('cancelled'):
+                    _sb_job_set(tid, status='cancelled', error='已打断')
+                else:
+                    _sb_job_set(tid, status='error', error=r.get('error'))
+            task_id = _submit_sb_job('director', _director_worker, params)
             self.send_json({'success': True, 'task_id': task_id, 'status': 'pending'})
         except Exception as e:
             import traceback; traceback.print_exc()
@@ -1499,7 +1554,31 @@ class Handler(BaseHTTPRequestHandler):
                     error = job['error']
                     sb_jobs.pop(task_id, None)
                     self.send_json({'success': True, 'status': 'error', 'error': error}); return
+                if status == 'cancelled':
+                    sb_jobs.pop(task_id, None)
+                    self.send_json({'success': True, 'status': 'cancelled', 'error': job.get('error') or '已打断'}); return
                 self.send_json({'success': True, 'status': status})
+        except Exception as e:
+            import traceback; traceback.print_exc()
+            self.send_json({'success': False, 'error': str(e)}, 500)
+
+    # ---- 分镜：打断异步任务（真实中断 ComfyUI 执行） ----
+
+    def sb_task_cancel(self):
+        try:
+            d = self.read_body()
+            task_id = d.get('task_id', '')
+            if not task_id:
+                self.send_json({'success': False, 'error': '缺少 task_id'}, 400); return
+            with sb_jobs_lock:
+                job = sb_jobs.get(task_id)
+                if job is None:
+                    self.send_json({'success': True, 'status': 'missing'}); return
+                job['cancelled'] = True
+                job['ts'] = time.time()
+            # 立即请求 ComfyUI 中断（worker 轮询也会再触发一次，双保险）
+            comfy_interrupt()
+            self.send_json({'success': True, 'status': 'cancelling'})
         except Exception as e:
             import traceback; traceback.print_exc()
             self.send_json({'success': False, 'error': str(e)}, 500)

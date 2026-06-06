@@ -19,6 +19,8 @@ const StoryboardModule = {
     _SB_TASK_KEY: 'assest_sb_gen_task',   // localStorage：进行中的 CC 分镜生成任务
     _SB_RESULT_KEY: 'assest_sb_gen_result', // localStorage：上次分镜生成结果横幅（常驻，手动关或下次覆盖）
     _FG_TASK_KEY: 'assest_sb_fg_tasks',   // localStorage：进行中的四宫格生成任务（刷新可恢复）
+    _VIDEO_TASK_KEY: 'assest_sb_video_task',   // localStorage：进行中的导演台视频生成任务（关弹窗/刷新仍保持）
+    _VIDEO_ERR_KEY: 'assest_sb_video_err',     // localStorage：上次视频生成失败信息（顶部显示，可×，下次生成清除）
 
     // 转场 → Epsilon 映射（依据 WhatDreamsCost LTXDirector 节点源码：
     // <0.1 都是硬边界，paper 默认 0.001；越大过渡越柔和）
@@ -2526,17 +2528,48 @@ const StoryboardModule = {
                         oninput="StoryboardModule.tlSeekFrame(this.value)">
                     <span class="sb-dir-cur" id="tlCur">0.00s</span>
                 </div>
+                <div id="tlVideoErrBanner">${this._videoErrBannerHtml()}</div>
                 <div class="sb-dir-preview" id="tlPreview"></div>
                 <audio id="tlAudioEl" preload="auto" style="display:none"></audio>
                 <div id="tlVideoResult"></div>
             </div>
             <div class="modal-footer">
                 <button class="btn-secondary" onclick="StoryboardModule.closeTimeline()">关闭</button>
+                <button class="btn-danger" id="tlCancelBtn" style="display:none" onclick="StoryboardModule.cancelVideo()">⏹ 打断</button>
                 <button class="btn-primary" id="tlGenBtn" onclick="StoryboardModule.genVideo()">🎬 生成视频</button>
             </div>`;
         document.getElementById('modalOverlay').classList.add('active');
         this._renderTracks();
         this._updatePreview();
+        this._resumeVideoTask();   // 若有进行中的视频任务：恢复计时/轮询/按钮态
+    },
+
+    // ===== 视频生成：任务持久化（关弹窗/刷新仍保持）=====
+    _saveVideoTask(t) { try { localStorage.setItem(this._VIDEO_TASK_KEY, JSON.stringify(t)); } catch (e) {} },
+    _loadVideoTask() { try { return JSON.parse(localStorage.getItem(this._VIDEO_TASK_KEY) || 'null'); } catch (e) { return null; } },
+    _clearVideoTask() { try { localStorage.removeItem(this._VIDEO_TASK_KEY); } catch (e) {} },
+
+    // ===== 视频生成：顶部失败横幅（可×，下次生成清除）=====
+    _saveVideoErr(text) { try { localStorage.setItem(this._VIDEO_ERR_KEY, JSON.stringify({ text, ts: Date.now() })); } catch (e) {} },
+    _loadVideoErr() { try { return JSON.parse(localStorage.getItem(this._VIDEO_ERR_KEY) || 'null'); } catch (e) { return null; } },
+    _clearVideoErr() {
+        try { localStorage.removeItem(this._VIDEO_ERR_KEY); } catch (e) {}
+        const el = document.getElementById('tlVideoErrBanner');
+        if (el) el.innerHTML = '';
+    },
+    dismissVideoErr() { this._clearVideoErr(); },
+    _videoErrBannerHtml() {
+        const r = this._loadVideoErr();
+        if (!r || !r.text) return '';
+        return `<div class="gen-result-banner err" id="sbVideoErrBanner">
+            <span class="gen-result-icon">❌</span>
+            <span class="gen-result-text">${this.esc(r.text)}</span>
+            <button class="gen-result-close" title="关闭" onclick="StoryboardModule.dismissVideoErr()">×</button>
+        </div>`;
+    },
+    _renderVideoErrBanner() {
+        const host = document.getElementById('tlVideoErrBanner');
+        if (host) host.innerHTML = this._videoErrBannerHtml();
     },
 
     // 重绘轨道区（标尺 + 图像轨 + 音频轨），不重建整个弹窗（拖拽时频繁调用）
@@ -3217,17 +3250,20 @@ const StoryboardModule = {
     closeTimeline() {
         if (this._tl && this._tl._raf) cancelAnimationFrame(this._tl._raf);
         this._pauseAudio();
+        this._stopVideoTimer();   // 仅停 UI 计时器；后台任务与轮询继续
         this._tl = null; App.closeModal(); this.render(this.projectId);
     },
 
     async genVideo() {
         const tl = this._tl;
         if (!tl || !tl.imageClips.length) { App.showToast('请至少保留一个图像段', 'error'); return; }
+        // 生成中禁止再次发起，直到完成/失败/打断结束
+        if (this._loadVideoTask()) { App.showToast('已有视频生成任务进行中，请等待完成或先打断', 'info'); return; }
         if (tl.playing) this.tlTogglePlay();
-        const btn = document.getElementById('tlGenBtn');
         const resEl = document.getElementById('tlVideoResult');
-        btn.disabled = true; btn.textContent = '⏳ 生成中…';
-        resEl.innerHTML = '<div class="sb-cc-running"><div class="sb-spinner"></div> 正在调用 LTX2.3 导演台生成视频，时间较长请耐心等待…</div>';
+        // 新一次生成：清掉上次失败横幅
+        this._clearVideoErr(); this._renderVideoErrBanner();
+        resEl.innerHTML = '<div class="sb-cc-running"><div class="sb-spinner"></div> 正在准备素材…</div>';
 
         // 仅纳入落在总时长范围内（start < totalFrames）的块；length 截断到不超过总长
         const total = tl.totalFrames;
@@ -3241,7 +3277,7 @@ const StoryboardModule = {
             const b64 = await this._urlToB64(Storage.mediaUrl(img.data));
             imageSegments.push({ image_b64: b64, prompt: c.prompt || (c.dialogue && c.dialogue.text) || '', start: c.start, length: clampLen(c) });
         }
-        if (!imageSegments.length) { btn.disabled = false; btn.textContent = '🎬 生成视频'; resEl.innerHTML = '<div class="sb-err">❌ 没有落在总时长范围内的图像段</div>'; return; }
+        if (!imageSegments.length) { resEl.innerHTML = '<div class="sb-err">❌ 没有落在总时长范围内的图像段</div>'; return; }
 
         const audioSegments = [];
         for (const c of [...tl.audioClips].sort((a, b) => a.start - b.start)) {
@@ -3264,21 +3300,137 @@ const StoryboardModule = {
                 fps: tl.fps,
             });
             if (!submit.success || !submit.task_id) throw new Error(submit.error || '提交失败');
-            const result = await this._pollTask(submit.task_id, (st) => {
-                resEl.innerHTML = `<div class="sb-cc-running"><div class="sb-spinner"></div> 状态：${st === 'running' ? '渲染中…' : '排队中…'}（总长 ${(total / tl.fps).toFixed(1)}s）</div>`;
-            }, 1000);
-            if (result && result.video_base64) {
-                const dataUrl = 'data:video/mp4;base64,' + result.video_base64;
-                resEl.innerHTML = `<video class="sb-result-video" controls autoplay src="${dataUrl}"></video>
-                    <div class="sb-dir-cur" style="margin-top:.5rem">✅ 生成成功（${result.frames || 0} 帧）。右键视频可保存。</div>`;
-                btn.disabled = false; btn.textContent = '🔄 重新生成';
-            } else {
-                throw new Error('未产出视频');
-            }
+            // 持久化任务：关弹窗 / 刷新后仍可恢复计时与轮询
+            this._saveVideoTask({ task_id: submit.task_id, start: Date.now(), projectId: this.projectId, totalFrames: total, fps: tl.fps });
+            this._startVideoTimer();
+            this._pollVideoTask(submit.task_id);
+            this._syncVideoUI();
         } catch (e) {
-            resEl.innerHTML = `<div class="sb-err">❌ ${this.esc(e.message)}</div>`;
-            btn.disabled = false; btn.textContent = '🔄 重试';
+            this._saveVideoErr('视频生成失败：' + (e.message || e));
+            this._renderVideoErrBanner();
+            resEl.innerHTML = '';
+            this._syncVideoUI();
         }
+    },
+
+    // ⏹ 打断：真实中断后台 ComfyUI 执行（调用 /api/sb_cancel）
+    async cancelVideo() {
+        const t = this._loadVideoTask();
+        if (!t) return;
+        const ok = await App.confirm({
+            title: '⏹ 打断生成',
+            message: '确定打断本次视频生成？\n\n会真实中断 ComfyUI 当前的渲染任务。',
+            okText: '打断',
+            cancelText: '继续等待',
+            danger: true,
+        });
+        if (!ok || !this._loadVideoTask()) return;
+        const btn = document.getElementById('tlCancelBtn');
+        if (btn) { btn.disabled = true; btn.textContent = '⏹ 打断中…'; }
+        try { await API.post('/api/sb_cancel', { task_id: t.task_id }); } catch (e) {}
+        // 轮询会收到 cancelled 状态并收尾；此处不直接清任务，交给 _pollVideoTask 统一处理
+    },
+
+    // 视频生成计时器：每秒刷新「生成中 Ns」（弹窗开着才更新 DOM）
+    _startVideoTimer() {
+        this._stopVideoTimer();
+        const tick = () => {
+            if (!this._loadVideoTask()) { this._stopVideoTimer(); return; }
+            this._syncVideoUI();
+        };
+        tick();
+        this._videoTimer = setInterval(tick, 1000);
+    },
+    _stopVideoTimer() {
+        if (this._videoTimer) { clearInterval(this._videoTimer); this._videoTimer = null; }
+    },
+
+    // 根据当前任务状态刷新弹窗内按钮 / 结果区（弹窗可能未打开，此时静默跳过 DOM）
+    _syncVideoUI() {
+        const btn = document.getElementById('tlGenBtn');
+        const cancelBtn = document.getElementById('tlCancelBtn');
+        const resEl = document.getElementById('tlVideoResult');
+        if (!btn) return;   // 弹窗未打开
+        const t = this._loadVideoTask();
+        if (t) {
+            const sec = Math.round((Date.now() - (t.start || Date.now())) / 1000);
+            btn.disabled = true; btn.textContent = `⏳ 生成中 ${sec}s`;
+            if (cancelBtn) {
+                cancelBtn.style.display = '';
+                if (cancelBtn.textContent.indexOf('打断中') < 0) { cancelBtn.disabled = false; cancelBtn.textContent = '⏹ 打断'; }
+            }
+            if (resEl && !resEl.querySelector('.sb-result-video')) {
+                resEl.innerHTML = `<div class="sb-cc-running"><div class="sb-spinner"></div> 渲染中… 已用 ${sec}s（总长 ${((t.totalFrames || 0) / (t.fps || 30)).toFixed(1)}s）</div>`;
+            }
+        } else {
+            btn.disabled = false;
+            if (cancelBtn) { cancelBtn.style.display = 'none'; cancelBtn.disabled = false; cancelBtn.textContent = '⏹ 打断'; }
+        }
+    },
+
+    // 视频任务轮询：done→展示视频；error→顶部失败横幅；cancelled→静默收尾
+    _pollVideoTask(taskId) {
+        this._videoPolling = taskId;
+        const interval = 1500;
+        const tick = async () => {
+            if (this._videoPolling !== taskId) return;   // 已被新任务/收尾替换
+            try {
+                const r = await API.post('/api/sb_task', { task_id: taskId });
+                if (!r.success) throw new Error(r.error || '查询失败');
+                if (r.status === 'done') { this._onVideoDone(r.result || {}); return; }
+                if (r.status === 'error') {
+                    this._clearVideoTask(); this._stopVideoTimer(); this._videoPolling = null;
+                    this._saveVideoErr('视频生成失败：' + (r.error || '未知错误'));
+                    this._renderVideoErrBanner();
+                    const resEl = document.getElementById('tlVideoResult'); if (resEl) resEl.innerHTML = '';
+                    this._syncVideoUI();
+                    return;
+                }
+                if (r.status === 'cancelled') {
+                    this._clearVideoTask(); this._stopVideoTimer(); this._videoPolling = null;
+                    const resEl = document.getElementById('tlVideoResult'); if (resEl) resEl.innerHTML = '<div class="sb-dir-cur">⏹ 已打断本次生成</div>';
+                    this._syncVideoUI();
+                    App.showToast('⏹ 已打断视频生成', 'info');
+                    return;
+                }
+                if (r.status === 'missing') {
+                    this._clearVideoTask(); this._stopVideoTimer(); this._videoPolling = null;
+                    this._saveVideoErr('视频任务已失效（服务可能已重启）');
+                    this._renderVideoErrBanner();
+                    this._syncVideoUI();
+                    return;
+                }
+                setTimeout(tick, interval);   // pending / running
+            } catch (e) {
+                setTimeout(tick, interval * 2);   // 网络抖动退避
+            }
+        };
+        tick();
+    },
+
+    _onVideoDone(result) {
+        this._clearVideoTask(); this._stopVideoTimer(); this._videoPolling = null;
+        this._syncVideoUI();
+        const resEl = document.getElementById('tlVideoResult');
+        if (resEl && result.video_base64) {
+            const dataUrl = 'data:video/mp4;base64,' + result.video_base64;
+            resEl.innerHTML = `<video class="sb-result-video" controls autoplay src="${dataUrl}"></video>
+                <div class="sb-dir-cur" style="margin-top:.5rem">✅ 生成成功（${result.frames || 0} 帧）。右键视频可保存。</div>`;
+            const btn = document.getElementById('tlGenBtn'); if (btn) btn.textContent = '🔄 重新生成';
+        } else if (!result.video_base64) {
+            this._saveVideoErr('视频生成失败：未产出视频');
+            this._renderVideoErrBanner();
+        }
+    },
+
+    // 打开弹窗时恢复：若有进行中的视频任务，继续计时 + 轮询；并补渲染失败横幅
+    _resumeVideoTask() {
+        this._renderVideoErrBanner();
+        const t = this._loadVideoTask();
+        if (!t) { this._syncVideoUI(); return; }
+        this._startVideoTimer();
+        if (this._videoPolling !== t.task_id) this._pollVideoTask(t.task_id);
+        this._syncVideoUI();
     },
 
     // ============================================================
