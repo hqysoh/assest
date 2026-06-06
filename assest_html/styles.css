@@ -441,7 +441,9 @@ input[type="checkbox"]{accent-color:var(--ac)}
 /* ============================================================
    分镜模块（四宫格工作流 + 时间轴）
    ============================================================ */
-.sb-toolbar{display:flex;justify-content:space-between;align-items:center;gap:1rem;margin-bottom:1.2rem;flex-wrap:wrap}
+.sb-toolbar{display:flex;justify-content:space-between;align-items:center;gap:1rem;margin-bottom:1.2rem;flex-wrap:wrap;position:sticky;top:118px;z-index:40;padding:0.55rem 0.8rem;border:1px solid var(--bd);border-radius:12px;box-shadow:0 4px 16px var(--sh)}
+[data-theme="dark"] .sb-toolbar, .sb-toolbar{background:rgba(22,26,46,.92);backdrop-filter:blur(var(--blur)) saturate(160%);-webkit-backdrop-filter:blur(var(--blur)) saturate(160%)}
+[data-theme="light"] .sb-toolbar{background:rgba(241,243,250,.94);backdrop-filter:blur(var(--blur)) saturate(160%);-webkit-backdrop-filter:blur(var(--blur)) saturate(160%)}
 .sb-toolbar-left{display:flex;gap:0.6rem;align-items:center;flex-wrap:wrap}
 .sb-count{font-size:0.8rem;color:var(--t2);background:var(--bg3);border:1px solid var(--bd);padding:0.4rem 0.85rem;border-radius:999px;font-weight:600}
 
