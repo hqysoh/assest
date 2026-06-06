@@ -30,3 +30,6 @@ workflow-api/
 .trae/
 prompt/
 README.md
+
+# CatPaw 本地工具目录（含 token 等敏感文件，勿提交）
+.catpaw/
