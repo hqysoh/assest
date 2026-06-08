@@ -861,6 +861,19 @@ body.sb-dir-ph-cursor{cursor:ew-resize !important}
 /* 聚焦时保持深底浅字（覆盖 .form-textarea:focus 把背景变白导致看不见的问题） */
 .sb-dir-prev-parea:focus{outline:none;border-color:var(--ac,#7c82ff);background:var(--bg3);
     color:var(--t);box-shadow:0 0 0 3px rgba(124,130,255,.22)}
+/* 转场 / 镜头语言区（接在 local 提示词下方，用青色系区分） */
+.sb-dir-prev-trans{padding:0.55rem 0.8rem 0.75rem;border-top:1px dashed var(--bd);
+    background:linear-gradient(180deg,rgba(45,212,191,.07),transparent)}
+.sb-dir-prev-trans .sb-dir-prev-plabel{color:var(--ok,#2dd4bf)}
+.sb-dir-trans-dur{font-size:0.66rem;color:var(--t2);font-weight:600;display:inline-flex;align-items:center;gap:0.3rem;white-space:nowrap}
+.sb-dir-trans-dur input{width:54px;background:var(--bg2);border:1px solid var(--bd);border-radius:7px;
+    color:var(--t);font-size:0.72rem;padding:0.18rem 0.35rem;text-align:center}
+.sb-dir-trans-dur input:focus{outline:none;border-color:var(--ok,#2dd4bf);box-shadow:0 0 0 2px rgba(45,212,191,.22)}
+.sb-dir-prev-tarea{width:100%;min-height:50px;resize:vertical;font-size:0.8rem;line-height:1.5;
+    border:1px solid var(--bd);border-radius:9px;padding:0.5rem 0.7rem;background:var(--bg3);
+    color:var(--t);transition:border-color .15s,box-shadow .15s}
+.sb-dir-prev-tarea:focus{outline:none;border-color:var(--ok,#2dd4bf);background:var(--bg3);
+    color:var(--t);box-shadow:0 0 0 3px rgba(45,212,191,.22)}
 .sb-tl-track{display:flex;gap:0.7rem;overflow-x:auto;padding:0.4rem 0.2rem 1rem;align-items:stretch;min-height:340px}
 .sb-tl-seg{flex-shrink:0;display:flex;flex-direction:column;background:var(--card-solid);border:1px solid var(--bd);border-radius:var(--r-sm);overflow:hidden;box-shadow:0 4px 14px var(--sh);transition:border-color .2s}
 .sb-tl-seg:hover{border-color:var(--ac)}

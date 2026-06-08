@@ -975,8 +975,17 @@ def run_director_sync(params, task_id=None):
         img_segs = sorted(img_segs or [], key=lambda s: int(s.get('start', 0)))
         if not img_segs:
             return {'success': False, 'error': '缺少图像段'}
+
+        # 转场支持：在相邻两个图像段之间，可插入一个「无图的纯文本转场段」。
+        #   该段不带 imageFile（节点不会把它当引导图，只当一段过渡 prompt），
+        #   时长 = transition_dur 秒（前端每段可调，默认 0=不插入）。
+        #   因为插入转场段会把后续内容整体后移，这里用 cursor 重排所有段的 start，
+        #   并用 shift_at（按原始帧累计的插入偏移）平移音频段。
+        cursor = 0
+        # 记录「原始帧位置 -> 累计已插入的转场帧」断点，用于音频对齐
+        shift_points = []   # [(orig_frame_after, extra_frames_total)]
+        cumulative_shift = 0
         for i, seg in enumerate(img_segs):
-            start = int(seg.get('start', 0))
             length = int(seg.get('length', 90))
             img_file = ''
             if seg.get('image_b64'):
@@ -987,7 +996,7 @@ def run_director_sync(params, task_id=None):
                     return {'success': False, 'error': f'第{i+1}个图像段上传失败: {e}'}
             timeline_segments.append({
                 'id': f'seg{i}_{random.randint(1000,9999)}',
-                'start': start, 'length': length,
+                'start': cursor, 'length': length,
                 'prompt': seg.get('prompt', ''),
                 'type': 'image',
                 'imageFile': img_file,
@@ -995,6 +1004,38 @@ def run_director_sync(params, task_id=None):
             })
             local_prompts.append(seg.get('prompt', ''))
             seg_lengths.append(str(length))
+            orig_end = int(seg.get('start', 0)) + length   # 该图像段在「原始时间轴」的结束帧
+            cursor += length
+
+            # 是否在该段后插入转场段（最后一段不插）
+            trans_text = str(seg.get('transition', '') or '').strip()
+            trans_dur_sec = float(seg.get('transition_dur', 0) or 0)
+            trans_frames = int(round(trans_dur_sec * fps))
+            if i < len(img_segs) - 1 and trans_text and trans_frames > 0:
+                # 镜头语言/转场段：无图，prompt 末尾强调「无字幕」
+                trans_prompt = trans_text if '无字幕' in trans_text else (trans_text + '，无字幕')
+                timeline_segments.append({
+                    'id': f'trans{i}_{random.randint(1000,9999)}',
+                    'start': cursor, 'length': trans_frames,
+                    'prompt': trans_prompt,
+                    'type': 'transition',   # 标记为转场段（无 imageFile，节点不当引导图）
+                    'imageFile': '',
+                    'imageB64': ''
+                })
+                local_prompts.append(trans_prompt)
+                seg_lengths.append(str(trans_frames))
+                cursor += trans_frames
+                cumulative_shift += trans_frames
+            # 记录此原始结束帧之后，应叠加的总偏移（音频用）
+            shift_points.append((orig_end, cumulative_shift))
+
+        def _shift_for(orig_frame):
+            """某原始帧位置应整体后移多少帧（= 它之前所有已插入转场段的总帧数）。"""
+            extra = 0
+            for boundary, total in shift_points:
+                if orig_frame >= boundary:
+                    extra = total
+            return extra
 
         for j, seg in enumerate(sorted(aud_segs or [], key=lambda s: int(s.get('start', 0)))):
             if not seg.get('audio_b64'):
@@ -1004,10 +1045,11 @@ def run_director_sync(params, task_id=None):
                 amime = seg.get('audio_mime', 'audio/wav')
                 aext = 'mp3' if 'mp3' in amime else ('flac' if 'flac' in amime else 'wav')
                 afile = comfy_upload_file(araw, f"sbaud_{int(time.time()*1000)}_{j}.{aext}")
+                a_start = int(seg.get('start', 0))
                 audio_segments.append({
                     'id': f'aud{j}_{random.randint(1000,9999)}',
                     'type': 'audio',
-                    'start': int(seg.get('start', 0)),
+                    'start': a_start + _shift_for(a_start),   # 跟随转场段顺延
                     'length': int(seg.get('length', 90)),
                     'trimStart': int(seg.get('trimStart', 0)),
                     'audioFile': afile, 'fileName': afile
@@ -1015,10 +1057,12 @@ def run_director_sync(params, task_id=None):
             except Exception as e:
                 print(f'[DIRECTOR] 第{j+1}个音频段上传失败: {e}')
 
-        # 总时长：优先用显式 total_frames；否则取所有段（图像+音频）的最大 end
+        # 总时长：插入转场段后用重排后的 cursor 与音频 end 的最大值。
+        #   原 total_frames 不含转场，这里需把转场帧数加进去。
         max_end = max([int(s['start']) + int(s['length']) for s in timeline_segments] +
                       [int(s['start']) + int(s['length']) for s in audio_segments] + [0])
-        total_frames = int(params.get('total_frames') or max_end)
+        base_total = int(params.get('total_frames') or 0)
+        total_frames = max(base_total + cumulative_shift, max_end)
     else:
         # ---------- B) 旧版成对格式（兼容） ----------
         segs = params.get('segments', [])
@@ -1076,9 +1120,9 @@ def run_director_sync(params, task_id=None):
             inp['segment_lengths'] = ",".join(seg_lengths)
             # epsilon：段间过渡软硬度。0.001=硬切（动作易僵），调高到 ~0.3 过渡更自然、运动更连贯。
             inp['epsilon'] = float(params.get('epsilon', 0.3))
-            # guide_strength：每段引导图的约束强度。1.0=把画面钉死在引导图上（动作几乎不变、生硬）。
-            #   这里把每段强度钳制到 max_guide_strength（默认 0.7），即使前端传 1.0 也降下来，给模型留出运动空间。
-            max_gs = float(params.get('max_guide_strength', 0.7))
+            # guide_strength：每段引导图的约束强度。1.0=最大约束，最贴近引导图（动作小但形象稳）。
+            #   每段强度钳制到 max_guide_strength（默认 1.0=不额外降低）；如需更自由的运动可在前端调低。
+            max_gs = float(params.get('max_guide_strength', 1.0))
             raw_gs = str(params.get('guide_strength', '') or '')
             if raw_gs.strip():
                 clamped = []

@@ -1439,6 +1439,7 @@ const StoryboardModule = {
                 idx: parseInt(k) || groups.length + 1,
                 globalPrompt: sb.global_prompt || '',
                 localPrompts: Array.isArray(sb.local_prompts) ? sb.local_prompts.slice(0, 4) : ['', '', '', ''],
+                shotTransitions: Array.isArray(sb.shot_transitions) ? sb.shot_transitions.slice(0, 4) : ['', '', '', ''],
                 nanoPrompt: sb.nano_banana_prompt || '',
                 refAssets: refs,
                 dialogues: Array.isArray(sb.dialogues) ? sb.dialogues : [],
@@ -2356,6 +2357,7 @@ const StoryboardModule = {
                     prompt: g.prompt || '',
                     length: 90, trimStart: 0,
                     transition: g.transition || 'cut',
+                    shotTransition: (g.shotTransitions || [])[0] || '',
                     dialogue: g.dialogue || {},
                 });
                 return;
@@ -2375,6 +2377,7 @@ const StoryboardModule = {
                     prompt: (g.localPrompts || [])[i] || g.globalPrompt || '',
                     length: 90, trimStart: 0,
                     transition: g.transition || 'cut',
+                    shotTransition: (g.shotTransitions || [])[i] || '',
                     dialogue: dlg[i] || {},
                 });
             }
@@ -2403,6 +2406,8 @@ const StoryboardModule = {
                 uid: imgUid,
                 imageId: s.imageId, prompt: s.prompt || '',
                 dialogue: s.dialogue || {}, transition: s.transition || 'cut',
+                shotTransition: s.shotTransition || '',   // 镜头语言/转场文本（AI 生成，可编辑）
+                transitionDur: (s.shotTransition || '').trim() ? 1 : 0,  // 有转场文本则默认 1s
                 start: cursor, length: len,
             });
             if (s.audioId != null) {
@@ -2426,7 +2431,7 @@ const StoryboardModule = {
             fps: this.FPS,
             pxPerFrame: 1.4,                      // 缩放：像素/帧
             globalPrompt: first.globalPrompt || first.prompt || '',
-            guideStrength: '0.70',                // 引导强度上限：越低动作越自由（1.0 易僵硬）
+            guideStrength: '1.00',                // 引导强度默认值（1.0=最大约束，最贴近引导图）
             epsilon: 0.3,                         // 过渡柔和度（0.001 硬切 ~ 1.0 最柔）
             useCustomAudio: audioClips.length > 0, // 使用音频：ON=用上传音频；OFF=让模型按提示词从零生成音频（含环境音）
             selectedUid: (imageClips[0] && imageClips[0].uid) || null,  // 预览/编辑当前选中的图像段
@@ -2509,7 +2514,7 @@ const StoryboardModule = {
                     </span>
                     <span class="sb-dir-sep"></span>
                     <span class="sb-dir-guide" title="引导强度上限：每段引导图对画面的约束。越低动作越自由，越高越贴近原图但易僵硬。建议 0.5~0.8">引导强度
-                        <input type="number" id="tlGuide" min="0" max="1" step="0.05" value="${tl.guideStrength || '0.70'}"
+                        <input type="number" id="tlGuide" min="0" max="1" step="0.05" value="${tl.guideStrength || '1.00'}"
                             oninput="StoryboardModule.tlSetGuide(this.value)">
                         <span class="sb-dir-eps-hint">0~1｜越低越敢动</span>
                     </span>
@@ -3162,6 +3167,23 @@ const StoryboardModule = {
         const talkBar = talk
             ? `<div class="sb-dir-prev-talk"><span class="sb-dir-prev-talk-icon">🗣️</span><span class="sb-dir-prev-talk-text">${this.esc(talk)}</span></div>`
             : '';
+        // 转场区：仅对「非最后一段」显示（最后一段后面没有下一镜头，无需转场）
+        const isLast = c ? (tl.imageClips.indexOf(c) === tl.imageClips.length - 1) : true;
+        const transVal = c ? (c.shotTransition || '') : '';
+        const transDur = c ? (c.transitionDur != null ? c.transitionDur : 1) : 1;
+        const transBlock = (c && !isLast) ? `
+            <div class="sb-dir-prev-trans">
+                <div class="sb-dir-prev-phead">
+                    <span class="sb-dir-prev-plabel">🎞️ 镜头语言 / 与下一镜头的转场描述</span>
+                    <label class="sb-dir-trans-dur">转场时长
+                        <input type="number" id="tlTransDur" min="0" max="5" step="0.5" value="${transDur}"
+                            oninput="StoryboardModule.tlSetTransDur('${c.uid}', this.value)"> 秒
+                    </label>
+                </div>
+                <textarea class="form-textarea sb-dir-prev-tarea" id="tlPrevTrans"
+                    placeholder="描述本镜头到下一镜头的过渡 / 镜头语言（如：镜头缓慢推近、淡入下一场景、人物转身离开…）。无字幕。留空则不插入转场段。"
+                    oninput="StoryboardModule.tlSetTrans('${c.uid}', this.value)">${this.esc(transVal)}</textarea>
+            </div>` : '';
         host.innerHTML = c ? `
             ${talkBar}
             <div class="sb-dir-prev-prompt">
@@ -3172,7 +3194,8 @@ const StoryboardModule = {
                 <textarea class="form-textarea sb-dir-prev-parea" id="tlPrevPrompt"
                     placeholder="描述这一段的画面内容…（local 提示词）"
                     oninput="StoryboardModule.tlSetPrompt('${c.uid}', this.value)">${this.esc(promptVal)}</textarea>
-            </div>`
+            </div>
+            ${transBlock}`
             : `<div class="sb-dir-prev-empty">点击上方图像段，可在此查看 / 编辑该段的 local 提示词</div>`;
         this._prevUid = c ? c.uid : null;
         this._prevTalk = talk;
@@ -3231,6 +3254,21 @@ const StoryboardModule = {
         } else if (span) {
             span.remove();
         }
+    },
+    // 转场描述：与下一镜头之间的过渡/镜头语言文本，写回到当前图像段（轻量，不重绘轨道）
+    tlSetTrans(uid, v) {
+        const c = this._tl && this._tl.imageClips.find(x => x.uid === uid);
+        if (!c) return;
+        c.shotTransition = v;
+    },
+    // 转场时长（秒）：合成时该段后插入的纯文本转场段长度，0=不插入
+    tlSetTransDur(uid, v) {
+        const c = this._tl && this._tl.imageClips.find(x => x.uid === uid);
+        if (!c) return;
+        let n = parseFloat(v);
+        if (isNaN(n) || n < 0) n = 0;
+        n = Math.min(5, n);   // 上限 5s
+        c.transitionDur = n;
     },
     // 音频同步：找到命中当前帧的音频块，定位 audio 元素到 (trimStart + 帧偏移)
     _syncAudioToFrame() {
@@ -3312,7 +3350,14 @@ const StoryboardModule = {
             const img = c.imageId != null ? Storage.getMediaById(this.projectId, c.imageId) : null;
             if (!img) continue;
             const b64 = await this._urlToB64(Storage.mediaUrl(img.data));
-            imageSegments.push({ image_b64: b64, prompt: c.prompt || (c.dialogue && c.dialogue.text) || '', start: c.start, length: clampLen(c) });
+            imageSegments.push({
+                image_b64: b64,
+                prompt: c.prompt || (c.dialogue && c.dialogue.text) || '',
+                start: c.start, length: clampLen(c),
+                // 镜头语言 / 与下一镜头的转场：后端据此在段间插入一个无图的纯文本过渡段
+                transition: (c.shotTransition || '').trim(),
+                transition_dur: (c.transitionDur != null ? c.transitionDur : 0),
+            });
         }
         if (!imageSegments.length) { resEl.innerHTML = '<div class="sb-err">❌ 没有落在总时长范围内的图像段</div>'; return; }
 
@@ -3332,8 +3377,8 @@ const StoryboardModule = {
                 total_frames: total,
                 global_prompt: tl.globalPrompt || '',
                 epsilon: (this._tl.epsilon ?? 0.3),
-                guide_strength: tl.guideStrength || '0.70',
-                max_guide_strength: parseFloat(tl.guideStrength || '0.70'),   // 每段引导强度上限
+                guide_strength: tl.guideStrength || '1.00',
+                max_guide_strength: parseFloat(tl.guideStrength || '1.00'),   // 每段引导强度上限
                 use_custom_audio: (tl.useCustomAudio !== false) && audioSegments.length > 0,
                 fps: tl.fps,
             });
