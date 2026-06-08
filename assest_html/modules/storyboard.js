@@ -3606,9 +3606,15 @@ const StoryboardModule = {
         const probe = (url) => new Promise((res) => {
             try {
                 const a = new Audio(); a.preload = 'metadata';
-                a.onloadedmetadata = () => res(a.duration || 0);
+                a.onloadedmetadata = () => {
+                    const d = a.duration;
+                    // 某些容器 metadata 给出 Infinity/NaN —— 视为探测失败（返回 0），避免 length 爆炸
+                    res((isFinite(d) && d > 0) ? d : 0);
+                };
                 a.onerror = () => res(0);
                 a.src = url;
+                // 兜底超时：3s 内没拿到 metadata 就放弃（避免卡住生成）
+                setTimeout(() => res(0), 3000);
             } catch (e) { res(0); }
         });
         // 先把每个音频段的真实时长探测出来（帧），回填到 clip 上。
@@ -3618,6 +3624,7 @@ const StoryboardModule = {
             if (!m) continue;
             const dur = await probe(Storage.mediaUrl(m.data));
             a.audioDurationFrames = Math.max(0, Math.round(dur * tl.fps));
+            console.log('[genVideo] 探测音频', { audioId: a.audioId, imgUid: a.imgUid, durSec: dur, frames: a.audioDurationFrames, url: Storage.mediaUrl(m.data) });
         }
         // 每个图像段 uid → 其关联音频段的真实时长（帧）。
         // 优先用 imgUid 显式关联；若关联缺失（手动加的音频等），退回按时间重叠匹配，
@@ -3677,6 +3684,9 @@ const StoryboardModule = {
         }
         // 至少要有一个带图的段（编辑接口/合成需要画面）
         if (!imageSegments.length) { resEl.innerHTML = '<div class="sb-err">❌ 没有落在总时长范围内的图像段</div>'; return; }
+        // 诊断：打印最终发给后端的图像段（重点看 length 是否已拉到音频时长、转场是否带上）
+        console.log('[genVideo] 最终图像段(发给后端)：', imageSegments.map(s => ({ length: s.length, transition: s.transition, transition_dur: s.transition_dur, promptHead: (s.prompt || '').slice(0, 12) })));
+        console.log('[genVideo] audLenByImg=', audLenByImg, ' totalFrames=', total);
 
         const audioSegments = [];
         for (const c of [...tl.audioClips].sort((a, b) => a.start - b.start)) {
