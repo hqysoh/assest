@@ -2116,9 +2116,19 @@ const StoryboardModule = {
             out.push({ idx: out.length + 1, type, name, item, mediaId, url, missing, manualKey: key });
         };
 
-        // ① 若 CC/Mock 标注了 ref_assets → 按其顺序
+        // 追加用户手动添加的额外参考图（不依赖人物/道具/场景库，直接引用任意已生成图像/切割分镜/上传图）
+        const pushExtras = () => {
+            (g.extraRefIds || []).forEach(mid => {
+                const m = Storage.getMediaById(this.projectId, mid);
+                if (!m) return;
+                out.push({ idx: out.length + 1, type: 'extra', name: '附加参考图', item: null, mediaId: m.id, url: Storage.mediaUrl(m.data), missing: false, extra: true, extraId: mid });
+            });
+        };
+
+        // ① 若 CC/Mock 标注了 ref_assets → 按其顺序（额外参考图仍需追加到末尾）
         if (Array.isArray(g.refAssets) && g.refAssets.length) {
             g.refAssets.forEach(r => push(r.type || 'character', r.name));
+            pushExtras();
             return out.slice(0, 8);
         }
 
@@ -2143,11 +2153,7 @@ const StoryboardModule = {
         if (!sceneAdded && (p.scenes || []).length) push('scene', p.scenes[0].name);
 
         // ⑤ 用户手动添加的额外参考图（不依赖人物/道具/场景库，直接引用任意已生成图像/切割分镜/上传图）
-        (g.extraRefIds || []).forEach(mid => {
-            const m = Storage.getMediaById(this.projectId, mid);
-            if (!m) return;
-            out.push({ idx: out.length + 1, type: 'extra', name: '附加参考图', item: null, mediaId: m.id, url: Storage.mediaUrl(m.data), missing: false, extra: true, extraId: mid });
-        });
+        pushExtras();
 
         return out.slice(0, 8);
     },
