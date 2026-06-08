@@ -195,6 +195,17 @@ const Storage = {
 模板结构：@人物声明 + 关键规则(含运镜策略) + 风格 + 场景描述 + 逐面板运镜与动作(面板1左上/2右上/3左下/4右下，各标景别+运镜) + 负面要求 + 「每个面板16:9，2x2网格排列」。
 视觉风格默认「电影级真实感，自然光照，真人演员」，用户另有指定则用用户值。
 
+【关键一致性铁律 — 四宫格图必须与 local_prompts 完全对应】
+- 四宫格的 4 个面板（左上→右上→左下→右下）必须**逐一对应** local_prompts 的第 1/2/3/4 项，**同序、同内容**。
+- 写每个面板时，把对应 local_prompt 里的核心画面信息**全部落到画面上**：景别、机位、说话人在画面中的位置（左/右/中央/前景/后景）、主体动作、面部表情与手势、环境与光影。做到「看图就能对上那句 local」。
+- 严禁出现 local 里没有的人物/道具/动作，也不要漏掉 local 里明确写到的关键元素（如手机、武器、特定手势、视线方向）。
+- 画面信息要**丰富具体**：每个面板都要交代清楚——谁、在画面哪个位置、什么景别与机位、在做什么动作、什么表情、周围环境与主光源方向/色调。不要笼统一句「人物在说话」。
+
+【去字幕铁律 — 四宫格图严禁任何文字】
+- nano_banana_prompt 正文里必须明确写出「画面干净、无任何字幕、无对白文字、无字母、无水印、无logo、无UI、无标题卡」。
+- 即使有台词，台词只用于配音与对口型，**绝对不要把台词文字画进画面**；画面中人物可以张嘴说话，但不出现任何文字。
+- 负面要求里务必包含：no subtitles, no captions, no text, no letters, no words, no watermark, no logo, no caption bar。
+
 # 六、global_prompt 与 local_prompts（核心，决定成片质量）
 - global_prompt：单段连贯中文，融合该组 4 个 Shot 的整体视觉描述、场景基底、统一光源与风格（涉及幻想生物须含完整形态描述并在每段重复）。
 
@@ -230,7 +241,7 @@ const Storage = {
       "global_prompt": "该组整体视觉描述、场景基底与统一光源（中文单行）",
       "local_prompts": ["中景，平视，镜头缓慢推近；周明在画面左侧，语气得意，停下打字伸懒腰，眉飞色舞、右手握拳轻挥，冷白日光从左侧窗户斜射，轻声说 '终于搞定了！'，嘴唇微启、面容生动，无字幕", "近景，过肩视角，固定机位；李静在画面中央，语气惊讶，猛地抬头瞪大双眼、双手撑桌起身，无台词、静默时刻，无字幕", "面板3描述（含完整7要素）…，无字幕", "面板4描述…，无字幕"],
       "shot_transitions": ["镜头由中景缓慢推近至近景，自然过渡，无字幕", "快速横摇切到对话另一方，无字幕", "光线渐暗淡入下一镜，无字幕", ""],
-      "nano_banana_prompt": "完整四宫格提示词（中文单行，含@图N声明）",
+      "nano_banana_prompt": "完整四宫格提示词（中文单行，含@图N声明）。4 个面板须逐一对应 local_prompts 第1/2/3/4项，把每项的景别/机位/位置/动作/表情/环境光影都画到对应面板上；正文结尾必须声明「画面干净、无任何字幕、无对白文字、无字母、无水印、无logo，每个面板16:9，2x2网格排列」",
       "ref_assets": [
         { "idx": 1, "type": "character", "name": "角色1名" },
         { "idx": 2, "type": "prop", "name": "道具名" },
@@ -242,13 +253,13 @@ const Storage = {
         { "panel": 3, "character": "", "text": "", "tone": "" },
         { "panel": 4, "character": "", "text": "", "tone": "" }
       ],
-      "negative_prompt": "英文负面词：worst quality, blurry, distorted face, deformed, extra fingers, bad anatomy, text overlay, watermark, multiple panels, split screen, picture-in-picture, frame within frame。涉及幻想生物追加其现实形态反义词。",
+      "negative_prompt": "英文负面词：subtitles, captions, caption bar, text, letters, words, on-screen text, dialogue text, watermark, logo, UI, title card, worst quality, blurry, distorted face, deformed, extra fingers, bad anatomy, text overlay, multiple panels overlap, split screen artifacts, picture-in-picture, frame within frame。涉及幻想生物追加其现实形态反义词。",
       "transition": "本组结束到下一组的转场建议：cut(硬切) / smooth(平滑过渡) / fade(淡入淡出)"
     }
   }
 }
 
-规则：所有字符串单行无换行；台词用英文单引号 '...' 包裹**真实中文台词原文**（严禁 'xxxxxx'/'台词' 等占位符，严禁空内容，严禁翻译成英文）；严禁中文引号；local_prompts 固定 4 项，每项须含完整 7 要素（镜头语言+说话人位置+语气+动作+表情手势+环境光影+台词处理）、描述丰富具体（30~60字）、末尾带「无字幕」；shot_transitions 固定 4 项（最后一项可空，其余末尾带「无字幕」）；dialogues 固定 4 项（无台词的面板字段留空）；幻想生物形态描述完整。`,
+规则：所有字符串单行无换行；台词用英文单引号 '...' 包裹**真实中文台词原文**（严禁 'xxxxxx'/'台词' 等占位符，严禁空内容，严禁翻译成英文）；严禁中文引号；local_prompts 固定 4 项，每项须含完整 7 要素（镜头语言+说话人位置+语气+动作+表情手势+环境光影+台词处理）、描述丰富具体（30~60字）、末尾带「无字幕」；nano_banana_prompt 的 4 个面板必须与 local_prompts 第1/2/3/4项逐一对应（同序、同画面内容），并在正文中明确声明「画面干净、无字幕、无任何文字/字母/水印/logo」；shot_transitions 固定 4 项（最后一项可空，其余末尾带「无字幕」）；dialogues 固定 4 项（无台词的面板字段留空）；幻想生物形态描述完整。`,
             voiceSettings: { textTemplate: "我是{name}，这是我的音色，很高兴认识你" },
             imageApiGroups: [
                 {
