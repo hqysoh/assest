@@ -3626,6 +3626,9 @@ const StoryboardModule = {
             a.audioDurationFrames = Math.max(0, Math.round(dur * tl.fps));
             console.log('[genVideo] 探测音频', { audioId: a.audioId, imgUid: a.imgUid, durSec: dur, frames: a.audioDurationFrames, url: Storage.mediaUrl(m.data) });
         }
+        // 诊断：打印图像段与音频段的关联全貌（定位为何某些段没拉伸）
+        console.log('[genVideo] 图像段：', tl.imageClips.map((c, i) => ({ i, uid: c.uid, start: c.start, length: c.length, hasText: !!(c.shotTransition || '').trim() })));
+        console.log('[genVideo] 音频段：', tl.audioClips.map((a, i) => ({ i, audioId: a.audioId, imgUid: a.imgUid, start: a.start, frames: a.audioDurationFrames, text: (a.text || '').slice(0, 10) })));
         // 每个图像段 uid → 其关联音频段的真实时长（帧）。
         // 优先用 imgUid 显式关联；若关联缺失（手动加的音频等），退回按时间重叠匹配，
         // 确保「图像段时长 ≥ 落在它身上的音频时长」，从根本上保证转场落在语音之后。

@@ -43,7 +43,7 @@ SB_JOB_TTL = 3600          # 分镜/视频类任务保留 1 小时（生成更�
 
 # 导演台 / TTS 克隆工作流路径
 DIRECTOR_WORKFLOW_PATH = os.path.join(os.path.dirname(__file__), "..", "workflow-api", "AI代码侠土豆-LTX2.3导演台工作流.json")
-TTS_CLONE_WORKFLOW_PATH = os.path.join(os.path.dirname(__file__), "..", "workflow-api", "Qwen3-TD-TTS语音克隆.json")
+TTS_CLONE_WORKFLOW_PATH = os.path.join(os.path.dirname(__file__), "..", "workflow-api", "vocpm语音克隆.json")
 
 
 def _new_task_id(prefix):
@@ -1008,17 +1008,18 @@ def run_tts_clone_sync(params):
     except Exception as e:
         return {'success': False, 'error': f'参考音频上传失败: {e}'}
 
-    # 2. 注入工作流参数
+    # 2. 注入工作流参数（VoxCPM 语音克隆）
     rseed = random.randint(1, 2**31)
     for nid, node in workflow.items():
         ct = node.get('class_type')
         if ct == 'LoadAudio':
             node['inputs']['audio'] = server_name
             node['inputs'].pop('audioUI', None)
-        elif ct == 'TDQwen3TTSVoiceClone':
-            node['inputs']['text'] = params.get('text', '')
-            if params.get('ref_text'):
-                node['inputs']['ref_text'] = params['ref_text']
+        elif ct == 'voxcpm_nkxx_unified_generator':
+            # 台词写入 target_text；语气（tone）写入 control_instruction（可控指令）
+            # 没有语气时置空 control_instruction（不保留工作流里的示例值）
+            node['inputs']['target_text'] = params.get('text', '')
+            node['inputs']['control_instruction'] = (params.get('ref_text') or '').strip()
             if 'seed' in node['inputs']:
                 node['inputs']['seed'] = rseed
 

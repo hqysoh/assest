@@ -179,6 +179,15 @@ const Storage = {
 为每个有台词的 Shot 记录：说话人角色名、台词中文原文、语气（如 语气得意/愤怒/委屈/平静/紧张/机械冰冷）。
 台词原文保持中文，**严禁翻译成英文**。
 
+【配音情绪标签库（仅用于 dialogues[].text 的配音文本，可选、克制点缀）】
+在 dialogues[].text 的台词中，可以根据情绪在合适位置**偶尔**点缀以下英文标签（一句最多 1~2 个，宁缺毋滥，无明显情绪就不加）：
+- 😆 笑声/叹气：[laughing]、[sigh]
+- 🤫 停顿/思考：[Uhm]、[Shh]
+- ❓ 疑问/确认：[Question-ah]、[Question-ei]、[Question-en]、[Question-oh]、[Confirmation-en]
+- ❗ 惊讶/情绪：[Surprise-wa]、[Surprise-yo]、[Surprise-ah]、[Surprise-oh]、[Dissatisfaction-hnn]
+标签按原文保留方括号与英文，直接嵌入中文台词中，例如：text 写「[Surprise-wa] 真的假的？」「原来是这样啊 [Confirmation-en]」。
+⚠ 这些标签**只能出现在 dialogues[].text**（送去配音的文本）里；**严禁出现在 local_prompts、global_prompt、nano_banana_prompt、shot_transitions 等任何画面提示词中**（画面提示词里的台词保持纯净中文，不带任何标签）。
+
 # 五、四宫格 NanoBanana 提示词（nano_banana_prompt）
 开头必须按**固定顺序**声明所有将随提示词一起送入的参考图，前端会严格按这个顺序拼接图像：
   1. 先按"本组台词首次出现顺序"列出涉及的所有人物："@图1是[角色1名]、@图2是[角色2名]…"
@@ -224,6 +233,7 @@ const Storage = {
     ✅ 正确：周明在画面左侧，语气得意，停下打字伸懒腰，轻声说 '终于！今天的报表又被我搞定了！'，面容生动、嘴唇微启。
     ❌ 严禁：出现 'xxxxxx'、'台词'、'……' 等占位符或空内容 —— 这是错误，单引号内必须是剧本真实台词。
     ❌ 严禁：把台词翻译成英文；严禁用中文引号 ""''或英文双引号 " 包裹台词。
+    ❌ 严禁：在 local_prompts 的台词里出现 [laughing]/[Surprise-wa]/[Confirmation-en] 等配音情绪标签 —— 这些标签只属于 dialogues[].text，画面提示词里的台词必须是纯净中文。
     说话动词用中文：低语/呢喃/轻声说/惊呼/问道/叹道/坚定地说/旁白/画外音。
   - 无台词的 Shot：末尾显式标注 无台词 / 静默时刻 / 仅环境音。
   - **多人同框**：必须写明谁在说话、谁不说话；不说话的角色标注「[角色名]在画面[位置]静默观看，不张嘴」，防止对口型驱动错人。
@@ -248,7 +258,7 @@ const Storage = {
         { "idx": 3, "type": "scene", "name": "场景名" }
       ],
       "dialogues": [
-        { "panel": 1, "character": "角色名或空", "text": "台词中文原文或空", "tone": "语气或空" },
+        { "panel": 1, "character": "角色名或空", "text": "台词中文原文或空（可按情绪点缀 [Surprise-wa]/[sigh] 等配音标签）", "tone": "语气或空" },
         { "panel": 2, "character": "", "text": "", "tone": "" },
         { "panel": 3, "character": "", "text": "", "tone": "" },
         { "panel": 4, "character": "", "text": "", "tone": "" }
@@ -259,7 +269,7 @@ const Storage = {
   }
 }
 
-规则：所有字符串单行无换行；台词用英文单引号 '...' 包裹**真实中文台词原文**（严禁 'xxxxxx'/'台词' 等占位符，严禁空内容，严禁翻译成英文）；严禁中文引号；local_prompts 固定 4 项，每项须含完整 7 要素（镜头语言+说话人位置+语气+动作+表情手势+环境光影+台词处理）、描述丰富具体（30~60字）、末尾带「无字幕」；nano_banana_prompt 的 4 个面板必须与 local_prompts 第1/2/3/4项逐一对应（同序、同画面内容），并在正文中明确声明「画面干净、无字幕、无任何文字/字母/水印/logo」；shot_transitions 固定 4 项（最后一项可空，其余末尾带「无字幕」）；dialogues 固定 4 项（无台词的面板字段留空）；幻想生物形态描述完整。`,
+规则：所有字符串单行无换行；台词用英文单引号 '...' 包裹**真实中文台词原文**（严禁 'xxxxxx'/'台词' 等占位符，严禁空内容，严禁翻译成英文）；严禁中文引号；local_prompts 固定 4 项，每项须含完整 7 要素（镜头语言+说话人位置+语气+动作+表情手势+环境光影+台词处理）、描述丰富具体（30~60字）、末尾带「无字幕」；nano_banana_prompt 的 4 个面板必须与 local_prompts 第1/2/3/4项逐一对应（同序、同画面内容），并在正文中明确声明「画面干净、无字幕、无任何文字/字母/水印/logo」；shot_transitions 固定 4 项（最后一项可空，其余末尾带「无字幕」）；dialogues 固定 4 项（无台词的面板字段留空，text 可按情绪偶尔点缀配音情绪标签如 [Surprise-wa]/[Confirmation-en]）；配音情绪标签**只允许出现在 dialogues[].text**，严禁出现在 local_prompts/global_prompt/nano_banana_prompt/shot_transitions 等画面提示词中；幻想生物形态描述完整。`,
             voiceSettings: { textTemplate: "我是{name}，这是我的音色，很高兴认识你" },
             imageApiGroups: [
                 {
