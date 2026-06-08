@@ -3597,9 +3597,26 @@ const StoryboardModule = {
         this._clearVideoErr(); this._renderVideoErrBanner();
         resEl.innerHTML = '<div class="sb-cc-running"><div class="sb-spinner"></div> 正在准备素材…</div>';
 
+        // 【关键】音频时长是异步探测的（<audio> metadata）。若用户在探测完成前就点生成，
+        // 图像段还停在默认 3s，而音频是 9s —— 转场段会从第 3s 插进来、把语音拦腰打断
+        //（现象：A 画面只到第 3s，转场随机画面占到第 9s，语音第 9s 才说完）。
+        // 这里在构建 segments 之前强制把所有音频时长探测完、并把图像段对齐到音频时长。
+        // 重置 audioDurationFrames 以便强制重新探测（用户可能换过图/音频）。
+        tl.audioClips.forEach(a => { a.audioDurationFrames = 0; });
+        await this._loadAudioDurations(true);
+
         // 仅纳入落在总时长范围内（start < totalFrames）的块；length 截断到不超过总长
         const total = tl.totalFrames;
         const clampLen = (c) => Math.max(1, Math.min(c.length, total - c.start));
+
+        // 图像段 uid → 其关联音频段的真实时长（帧）。转场是「紧跟图像段之后」插入的，
+        // 若图像段比音频短（如音频时长还没探测完、图像段停在默认3s），转场会从第3s插进来、
+        // 把9s语音拦腰打断。这里把每个图像段时长对齐到「自身与其音频的较大值」，确保转场落在语音之后。
+        const audLenByImg = {};
+        tl.audioClips.forEach(a => {
+            const L = a.audioDurationFrames || a.length || 0;
+            if (a.imgUid) audLenByImg[a.imgUid] = Math.max(audLenByImg[a.imgUid] || 0, L);
+        });
 
         const imageSegments = [];
         for (const c of [...tl.imageClips].sort((a, b) => a.start - b.start)) {
@@ -3610,10 +3627,12 @@ const StoryboardModule = {
             // 转场「附着」在图像段上：把该段的转场文字 + 时长一并带给后端，
             // 后端会自动在相邻两段之间插入「无图纯文本转场段」并顺延音频（不用手动摆位置）。
             const tText = (c.shotTransition || '').trim();
+            // 图像段时长对齐到音频时长（取较大值），避免转场把语音截断
+            const segLen = Math.max(clampLen(c), audLenByImg[c.uid] || 0);
             imageSegments.push({
                 image_b64: b64,
                 prompt: c.prompt || (c.dialogue && c.dialogue.text) || '',
-                start: c.start, length: clampLen(c),
+                start: c.start, length: segLen,
                 transition: tText,
                 transition_dur: tText ? (Number(c.transitionDur) || 1) : 0,
             });
