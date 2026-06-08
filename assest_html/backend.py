@@ -164,22 +164,84 @@ def _find_claude_bin():
     return 'claude'  # 兜底，交给 shell 解析
 
 
-def run_claude_cc(prompt_file, output_file, timeout=600, cwd=None):
+def _kill_proc_tree(proc):
+    """跨平台杀掉一个子进程及其整个进程树。
+    Windows 用 taskkill /T /F 杀进程树（claude 常是 .cmd 包装，必须连子进程一起杀，
+    否则真正的 node/claude 子进程仍持有 claude_output.txt 句柄，导致 WinError 32）。"""
+    if proc is None:
+        return
+    try:
+        if proc.poll() is not None:
+            return  # 已结束
+    except Exception:
+        pass
+    try:
+        if os.name == 'nt':
+            subprocess.run(['taskkill', '/F', '/T', '/PID', str(proc.pid)],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                           timeout=10)
+        else:
+            proc.terminate()
+            try:
+                proc.wait(timeout=3)
+            except Exception:
+                proc.kill()
+    except Exception as e:
+        print(f'[CC] kill proc tree failed: {e}')
+    finally:
+        try:
+            proc.wait(timeout=3)
+        except Exception:
+            pass
+
+
+def _safe_remove(path, retries=5, delay=0.3):
+    """删除文件，容忍 Windows 上偶发的占用（WinError 32）：重试，仍失败则忽略。"""
+    if not os.path.exists(path):
+        return True
+    for _ in range(retries):
+        try:
+            os.remove(path)
+            return True
+        except OSError:
+            time.sleep(delay)
+    print(f'[CC] 文件仍被占用，跳过删除：{path}')
+    return False
+
+
+def run_claude_cc(prompt_file, output_file, timeout=600, cwd=None, on_proc=None):
     """跨平台调用 Claude Code：以 prompt_file 作为 stdin，stdout/stderr 重定向到 output_file。
     用 Python 文件句柄替代 shell 的 < > 重定向，规避 Windows/macOS shell 差异。
-    返回 output_file 的文本内容。"""
+    on_proc(proc): 拿到 Popen 句柄后回调（用于把进程存到任务上，便于打断时杀进程树）。
+    返回 output_file 的文本内容。被打断时进程被杀，函数正常返回已写入的内容。"""
     claude = _find_claude_bin()
     args = [claude, '--verbose', '--output-format=stream-json',
             '--permission-mode=bypassPermissions',
             '--disallowed-tools', 'EnterPlanMode', 'ExitPlanMode', 'AskUserQuestion',
             '--print']
+    # Windows 下 .cmd/.ps1 需要 shell=True 才能被正确解析
+    use_shell = os.name == 'nt' and claude.lower().endswith(('.cmd', '.ps1', '.bat'))
+    # Windows 下新建进程组，便于 taskkill /T 整树清理
+    popen_kw = {}
+    if os.name == 'nt':
+        popen_kw['creationflags'] = getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0)
+    proc = None
     with open(prompt_file, 'r', encoding='utf-8') as fin, \
          open(output_file, 'w', encoding='utf-8') as fout:
-        # Windows 下 .cmd/.ps1 需要 shell=True 才能被正确解析
-        use_shell = os.name == 'nt' and claude.lower().endswith(('.cmd', '.ps1', '.bat'))
-        subprocess.run(args if not use_shell else ' '.join(f'"{a}"' for a in args),
-                       stdin=fin, stdout=fout, stderr=subprocess.STDOUT,
-                       text=True, timeout=timeout, cwd=cwd, shell=use_shell)
+        proc = subprocess.Popen(
+            args if not use_shell else ' '.join(f'"{a}"' for a in args),
+            stdin=fin, stdout=fout, stderr=subprocess.STDOUT,
+            text=True, cwd=cwd, shell=use_shell, **popen_kw)
+        if on_proc:
+            try:
+                on_proc(proc)
+            except Exception:
+                pass
+        try:
+            proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            _kill_proc_tree(proc)
+            raise
     log_text = ''
     if os.path.exists(output_file):
         with open(output_file, 'r', encoding='utf-8', errors='ignore') as f:
@@ -272,10 +334,14 @@ def _run_storyboard_job(task_id, params):
             f.write(full_prompt)
 
         lf = os.path.join(od, 'claude_output.txt')
-        if os.path.exists(lf):
-            os.remove(lf)
+        _safe_remove(lf)
+        if _sb_job_cancelled(task_id):
+            _sb_job_set(task_id, status='cancelled', error='已打断'); return
         _sb_job_set(task_id, status='running')
-        log_text = run_claude_cc(pf, lf, timeout=600, cwd=od)
+        log_text = run_claude_cc(pf, lf, timeout=600, cwd=od,
+                                 on_proc=lambda pr: _sb_job_set(task_id, proc=pr))
+        if _sb_job_cancelled(task_id):
+            _sb_job_set(task_id, status='cancelled', error='已打断'); return
 
         # 解析：先逐行找 result 事件里的 JSON，再兜底全文
         result_obj = None
@@ -339,10 +405,14 @@ def _run_extract_job(task_id, params):
         with open(pf, 'w', encoding='utf-8') as f:
             f.write(fp)
         lf = os.path.join(od, 'claude_output.txt')
-        if os.path.exists(lf):
-            os.remove(lf)
+        _safe_remove(lf)
+        if _sb_job_cancelled(task_id):
+            _sb_job_set(task_id, status='cancelled', error='已打断'); return
         _sb_job_set(task_id, status='running')
-        log_text = run_claude_cc(pf, lf, timeout=300, cwd=od)
+        log_text = run_claude_cc(pf, lf, timeout=300, cwd=od,
+                                 on_proc=lambda pr: _sb_job_set(task_id, proc=pr))
+        if _sb_job_cancelled(task_id):
+            _sb_job_set(task_id, status='cancelled', error='已打断'); return
 
         # 解析：优先逐行找 result 事件里的 JSON 块，再兜底全文
         result_obj = None
@@ -1660,7 +1730,12 @@ class Handler(BaseHTTPRequestHandler):
                     self.send_json({'success': True, 'status': 'missing'}); return
                 job['cancelled'] = True
                 job['ts'] = time.time()
-            # 立即请求 ComfyUI 中断（worker 轮询也会再触发一次，双保险）
+                proc = job.get('proc')   # CC 分镜/提取任务的 Claude Code 进程
+            # 1) 若是 Claude Code 任务：直接杀掉进程树，释放 claude_output.txt 句柄
+            if proc is not None:
+                _kill_proc_tree(proc)
+                _sb_job_set(task_id, status='cancelled', error='已打断', proc=None)
+            # 2) 若是 ComfyUI 视频任务：请求中断（worker 轮询也会再触发一次，双保险）
             comfy_interrupt()
             self.send_json({'success': True, 'status': 'cancelling'})
         except Exception as e:

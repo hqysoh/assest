@@ -62,6 +62,7 @@ const StoryboardModule = {
                     <button class="btn-secondary" onclick="StoryboardModule.exportContextJson()" title="导出剧本 / 人物 / 道具 / 场景为 JSON，供另一台机器导入或生成分镜复用">📤 导出素材</button>
                     <button class="btn-secondary" onclick="StoryboardModule.openTimeline()" ${groups.length ? '' : 'disabled'}>🎞️ 合成视频（时间轴）</button>
                     <button class="btn-secondary sb-mark-global" onclick="StoryboardModule.markAllSelectedGlobal()" ${groups.length ? '' : 'disabled'} title="把所有组中当前『已勾选合成』的分镜一键标记为已处理（置灰并取消勾选）">✅ 标记已选</button>
+                    <button class="btn-secondary btn-ghost-danger sb-del-all" onclick="StoryboardModule.delAllGroups()" ${groups.length ? '' : 'disabled'} title="一键删除当前项目下的全部分镜（四宫格 + 单分镜），此操作不可撤销">🗑️ 全部删除</button>
                 </div>
                 <div class="sb-toolbar-right">
                     <span class="sb-count">${groups.length} 组四宫格 · ${groups.length * 4} 个分镜</span>
@@ -1228,14 +1229,15 @@ const StoryboardModule = {
         if (this._genMainTimer) { clearInterval(this._genMainTimer); this._genMainTimer = null; }
     },
 
-    // ⏹ 停止：仅前端停止跟踪本次生成（清任务、停轮询、停计时器，按钮恢复可点）。
-    // 注意：后台 CC 子进程可能仍在运行（无后端取消接口），但前端不再等待其结果。
+    // ⏹ 停止：前端清任务/停轮询/停计时器并恢复按钮，同时调用 /api/sb_cancel
+    // 真实杀掉后台 Claude Code 进程树（释放 claude_output.txt 占用），可立即重新生成。
     async stopGenerate() {
-        if (!this._loadGenTask()) return;
+        const t = this._loadGenTask();
+        if (!t) return;
         const ok = await App.confirm({
             title: '⏹ 停止生成',
-            message: '停止跟踪本次生成？\n\n前端会立即恢复「智能生成分镜」按钮；后台任务可能仍在运行，但其结果将不再自动写入。',
-            okText: '停止跟踪',
+            message: '停止本次生成？\n\n会立即终止后台的 Claude Code 进程并恢复「智能生成分镜」按钮，可马上重新生成。',
+            okText: '停止生成',
             cancelText: '继续等待',
             danger: true,
         });
@@ -1243,10 +1245,14 @@ const StoryboardModule = {
         this._genPolling = false;
         this._clearGenTask();
         this._stopGenMainTimer();
+        // 真实打断：通知后端杀掉 Claude Code 进程树，释放 claude_output.txt 占用
+        if (t.taskId) {
+            try { await API.post('/api/sb_cancel', { task_id: t.taskId }); } catch (e) {}
+        }
         // 关闭可能开着的执行弹窗
         const out = document.getElementById('sbGenOutput');
         if (out) App.closeModal();
-        App.showToast('⏹ 已停止跟踪本次生成', 'info');
+        App.showToast('⏹ 已停止本次生成', 'info');
         if (this.projectId) this.render(this.projectId);
     },
 
@@ -2332,6 +2338,29 @@ const StoryboardModule = {
         Storage.updateProject(this.projectId, { storyboardGroups: groups });
         App.closeModal();
         App.showToast('已删除', 'success');
+        this.render(this.projectId);
+    },
+
+    // 全选删除：一键清空当前项目下的所有分镜（四宫格 + 单分镜）
+    delAllGroups() {
+        const p = Storage.getProject(this.projectId);
+        const groups = p.storyboardGroups || [];
+        if (!groups.length) return;
+        const total = groups.length;
+        const single = groups.filter(g => g.single).length;
+        const four = total - single;
+        const mc = document.getElementById('modalContent');
+        mc.innerHTML = `<div class="modal-header"><h2 class="modal-title">确认全部删除</h2></div>
+            <div class="modal-body"><p style="text-align:center;padding:1rem">确定要删除当前项目下的<b>全部 ${total} 个分镜</b>（${four} 组四宫格 · ${single} 个单分镜）吗？<br>此操作不可撤销。</p></div>
+            <div class="modal-footer"><button class="btn-secondary" onclick="App.closeModal()">取消</button>
+            <button class="btn-danger" onclick="StoryboardModule.doDelAllGroups()">确认全部删除</button></div>`;
+        document.getElementById('modalOverlay').classList.add('active');
+    },
+
+    doDelAllGroups() {
+        Storage.updateProject(this.projectId, { storyboardGroups: [] });
+        App.closeModal();
+        App.showToast('已删除全部分镜', 'success');
         this.render(this.projectId);
     },
 
