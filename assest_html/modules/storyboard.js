@@ -3427,6 +3427,8 @@ const StoryboardModule = {
         const talkBar = talk
             ? `<div class="sb-dir-prev-talk"><span class="sb-dir-prev-talk-icon">🗣️</span><span class="sb-dir-prev-talk-text">${this.esc(talk)}</span></div>`
             : '';
+        const transVal = c ? (c.shotTransition || '') : '';
+        const transDur = c ? (Number(c.transitionDur) || 1) : 1;
         host.innerHTML = c ? `
             ${talkBar}
             <div class="sb-dir-prev-prompt">
@@ -3437,6 +3439,18 @@ const StoryboardModule = {
                 <textarea class="form-textarea sb-dir-prev-parea" id="tlPrevPrompt"
                     placeholder="描述这一段的画面内容…（local 提示词）"
                     oninput="StoryboardModule.tlSetPrompt('${c.uid}', this.value)">${this.esc(promptVal)}</textarea>
+            </div>
+            <div class="sb-dir-prev-prompt sb-dir-prev-trans">
+                <div class="sb-dir-prev-phead">
+                    <span class="sb-dir-prev-plabel">🎞️ 转场提示词 · 第 ${idx} 段 → 下一段</span>
+                    <span class="sb-dir-trans-dur" title="转场时长（秒），合成时作为两段之间的纯文本过渡段插入">时长
+                        <input type="number" min="0.5" step="0.5" value="${transDur}"
+                            oninput="StoryboardModule.tlSetTransDur('${c.uid}', this.value)"> 秒
+                    </span>
+                </div>
+                <textarea class="form-textarea sb-dir-prev-parea" id="tlPrevTrans"
+                    placeholder="到下一段的转场 / 镜头语言（如：镜头由中景推近至特写、硬切到对话另一方…）。留空则不插入转场段。"
+                    oninput="StoryboardModule.tlSetTrans('${c.uid}', this.value)">${this.esc(transVal)}</textarea>
             </div>`
             : `<div class="sb-dir-prev-empty">点击上方图像段，可在此查看 / 编辑该段的 local 提示词</div>`;
         this._prevUid = c ? c.uid : null;
@@ -3496,6 +3510,22 @@ const StoryboardModule = {
         } else if (span) {
             span.remove();
         }
+    },
+    // 编辑「转场提示词」（写回选中图像段的 shotTransition）：轻量写回，不重绘轨道，避免打断输入。
+    // 合成时该段会带着 transition 文本 + transitionDur 秒发给后端，由后端自动夹在两段之间。
+    tlSetTrans(uid, v) {
+        const c = this._tl && this._tl.imageClips.find(x => x.uid === uid);
+        if (!c) return;
+        c.shotTransition = v;
+        // 文本从无到有时给个默认时长，避免合成时被当作 0=不插入
+        if (v && !(Number(c.transitionDur) > 0)) c.transitionDur = 1;
+    },
+    // 编辑转场时长（秒）
+    tlSetTransDur(uid, v) {
+        const c = this._tl && this._tl.imageClips.find(x => x.uid === uid);
+        if (!c) return;
+        const sec = Math.max(0.5, Number(v) || 1);
+        c.transitionDur = sec;
     },
     // 音频同步：找到命中当前帧的音频块，定位 audio 元素到 (trimStart + 帧偏移)
     _syncAudioToFrame() {
