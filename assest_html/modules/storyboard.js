@@ -901,7 +901,24 @@ const StoryboardModule = {
                     </div>
                 </div>
                 ${audUrl ? `<audio id="sbAaudio_${g.id}_${i}" preload="none" src="${audUrl}" style="display:none"></audio>` : ''}
+                ${this._renderTransRow(g, i)}
             </div>
+        </div>`;
+    },
+
+    // 转场描述行：独立于 local 提示词，单独展示在每个面板下方（4 个面板都展示）。
+    // 第 4 面板的转场接下一组第 1 面板（多个四宫格连续生成时需要）；最后一组的最后一个可由用户自行删除。
+    // 合成视频时，该文本会作为「无图无音频的纯文本段」插到本面板与下一面板之间，仅给 API 填 local 提示词。
+    _renderTransRow(g, i) {
+        const trans = (g.shotTransitions || [])[i] || '';
+        const label = i < 3 ? `转场${i + 1}→${i + 2}` : '转场→下一组';
+        return `<div class="sb-trans-row" title="镜头语言 / 与下一面板（第4面板为下一组首面板）之间的转场。合成视频时作为两图之间的纯文本过渡段（无图、无音频）送入。">
+            <span class="sb-trans-ic">🎞️ ${label}</span>
+            ${InlineEdit.field(trans, {
+                single: true,
+                placeholder: '点击填写到下一面板的转场 / 镜头语言（如：镜头由中景推近至特写、硬切到对话另一方…）。留空则不插入转场段。',
+                className: 'sb-trans-text clamp-1',
+                data: { edit: 'sb-panel', gid: g.id, panel: i, field: 'shotTransition' } })}
         </div>`;
     },
 
@@ -1608,28 +1625,174 @@ const StoryboardModule = {
     },
 
     _renderFgAssetRows(gid, assets) {
-        if (!assets.length) return '<div class="form-hint">未识别到任何参考资产</div>';
-        return `<div class="sb-fg-ref-grid">` + assets.map(a => {
-            const typeIcon = a.type === 'character' ? '👤' : (a.type === 'prop' ? '🔧' : '🏞️');
-            const typeLab = this._typeLabel(a.type);
+        const grid = assets.map(a => {
+            const typeIcon = a.type === 'character' ? '👤' : (a.type === 'prop' ? '🔧' : (a.type === 'scene' ? '🏞️' : '📌'));
+            const typeLab = a.extra ? '附加' : this._typeLabel(a.type);
             const thumb = a.url
                 ? `<img src="${a.url}" alt="${this.esc(a.name)}">`
                 : `<div class="sb-fg-ref-miss">缺图</div>`;
-            const ownerId = a.item ? a.item.id : '';
-            const storageType = a.type === 'character' ? 'characters' : (a.type === 'prop' ? 'props' : 'scenes');
-            return `<div class="sb-fg-ref-cell ${a.missing ? 'is-miss' : ''}">
+            const mk = a.manualKey ? encodeURIComponent(a.manualKey) : '';
+            const isManual = !a.extra && !a.missing && a.manualKey && (((Storage.getProject(this.projectId).storyboardGroups || []).find(x => x.id === gid) || {}).refManual || {})[a.manualKey] != null;
+
+            // 操作按钮区
+            let actions = '';
+            if (a.extra) {
+                // 额外参考图：可删除
+                actions = `<button class="btn-ghost btn-tiny" onclick="StoryboardModule._fgRemoveExtra('${gid}','${a.extraId}')">✕ 删除</button>`;
+            } else if (a.missing) {
+                // 缺图：选已生成图 / 上传（手动补到 refManual[key]）
+                actions = `<button class="btn-ghost btn-tiny" onclick="StoryboardModule._fgPickForMissing('${gid}','${mk}')">🖼️ 选图</button>
+                    <button class="btn-ghost btn-tiny" onclick="StoryboardModule._fgUploadForMissing('${gid}','${mk}')">📁 上传</button>`;
+            } else if (isManual) {
+                // 手动补过的图：可更换 / 清除（恢复缺图状态）
+                actions = `<button class="btn-ghost btn-tiny" onclick="StoryboardModule._fgPickForMissing('${gid}','${mk}')">🔄 更换</button>
+                    <button class="btn-ghost btn-tiny" onclick="StoryboardModule._fgClearManual('${gid}','${mk}')">✕ 清除</button>`;
+            }
+
+            return `<div class="sb-fg-ref-cell ${a.missing ? 'is-miss' : ''} ${a.extra ? 'is-extra' : ''}">
                 <div class="sb-fg-ref-idx">@图${a.idx}</div>
                 <div class="sb-fg-ref-thumb">${thumb}</div>
                 <div class="sb-fg-ref-name" title="${this.esc(a.name)}">${typeIcon} ${this.esc(a.name)}</div>
-                <div class="sb-fg-ref-type">${typeLab}</div>
-                ${a.missing ? `<button class="btn-ghost btn-tiny" ${ownerId ? '' : 'disabled title="该项未在素材库中"'} onclick="StoryboardModule._fgUploadRef('${gid}','${storageType}','${ownerId}')">📁 上传</button>` : ''}
+                <div class="sb-fg-ref-type">${typeLab}${isManual ? ' · 手动' : ''}</div>
+                ${actions ? `<div class="sb-fg-ref-acts">${actions}</div>` : ''}
             </div>`;
-        }).join('') + `</div>`;
+        }).join('');
+
+        // 底部「添加参考图」入口（追加额外参考图，不依赖人物/道具/场景库）
+        const addBtn = `<div class="sb-fg-ref-add">
+            <button class="btn-ghost btn-tiny" onclick="StoryboardModule._fgAddExtra('${gid}')">＋ 添加参考图（选已生成图/切割分镜）</button>
+            <button class="btn-ghost btn-tiny" onclick="StoryboardModule._fgUploadExtra('${gid}')">📁 上传新图</button>
+        </div>`;
+
+        return `<div class="sb-fg-ref-grid">${grid || '<div class="form-hint">未识别到任何参考资产</div>'}</div>${addBtn}`;
     },
 
-    // 弹窗内点上传：写入素材库后重新打开配置弹窗（参考图清单刷新）
-    _fgUploadRef(gid, type, ownerId) {
-        if (!ownerId) { App.showToast('请先到对应页面添加该条目', 'error'); return; }
+    // ===== 缺图素材：选择已生成图像（含切割分镜）补到 refManual[key] =====
+    _fgPickForMissing(gid, encKey) {
+        const key = decodeURIComponent(encKey || '');
+        if (!key) return;
+        this._fgImagePicker(gid, '🖼️ 为缺图素材选择参考图', (mid) => {
+            const p = Storage.getProject(this.projectId);
+            const g = (p.storyboardGroups || []).find(x => x.id === gid);
+            if (!g) return;
+            g.refManual = g.refManual || {};
+            g.refManual[key] = mid;
+            Storage.updateProject(this.projectId, { storyboardGroups: p.storyboardGroups });
+            App.showToast('✅ 已补充参考图', 'success');
+            this._showFgConfigModal(gid);
+            this.render(this.projectId);
+        });
+    },
+
+    // 缺图素材：上传一张图作为该素材的参考图（不写入人物/道具/场景库，仅作分镜临时参考）
+    _fgUploadForMissing(gid, encKey) {
+        const key = decodeURIComponent(encKey || '');
+        if (!key) return;
+        this._fgUploadToLib(gid, (mid) => {
+            const p = Storage.getProject(this.projectId);
+            const g = (p.storyboardGroups || []).find(x => x.id === gid);
+            if (!g) return;
+            g.refManual = g.refManual || {};
+            g.refManual[key] = mid;
+            Storage.updateProject(this.projectId, { storyboardGroups: p.storyboardGroups });
+            App.showToast('✅ 已上传并补充参考图', 'success');
+            this._showFgConfigModal(gid);
+            this.render(this.projectId);
+        });
+    },
+
+    // 清除手动补图，恢复缺图状态
+    _fgClearManual(gid, encKey) {
+        const key = decodeURIComponent(encKey || '');
+        const p = Storage.getProject(this.projectId);
+        const g = (p.storyboardGroups || []).find(x => x.id === gid);
+        if (!g || !g.refManual) return;
+        delete g.refManual[key];
+        Storage.updateProject(this.projectId, { storyboardGroups: p.storyboardGroups });
+        this._showFgConfigModal(gid);
+        this.render(this.projectId);
+    },
+
+    // ===== 额外参考图：添加（选已生成图）/上传/删除 =====
+    _fgAddExtra(gid) {
+        this._fgImagePicker(gid, '＋ 添加附加参考图', (mid) => {
+            const p = Storage.getProject(this.projectId);
+            const g = (p.storyboardGroups || []).find(x => x.id === gid);
+            if (!g) return;
+            g.extraRefIds = g.extraRefIds || [];
+            if (!g.extraRefIds.map(String).includes(String(mid))) g.extraRefIds.push(mid);
+            Storage.updateProject(this.projectId, { storyboardGroups: p.storyboardGroups });
+            App.showToast('✅ 已添加参考图', 'success');
+            this._showFgConfigModal(gid);
+            this.render(this.projectId);
+        });
+    },
+
+    _fgUploadExtra(gid) {
+        this._fgUploadToLib(gid, (mid) => {
+            const p = Storage.getProject(this.projectId);
+            const g = (p.storyboardGroups || []).find(x => x.id === gid);
+            if (!g) return;
+            g.extraRefIds = g.extraRefIds || [];
+            g.extraRefIds.push(mid);
+            Storage.updateProject(this.projectId, { storyboardGroups: p.storyboardGroups });
+            App.showToast('✅ 已上传并添加参考图', 'success');
+            this._showFgConfigModal(gid);
+            this.render(this.projectId);
+        });
+    },
+
+    _fgRemoveExtra(gid, mid) {
+        const p = Storage.getProject(this.projectId);
+        const g = (p.storyboardGroups || []).find(x => x.id === gid);
+        if (!g) return;
+        g.extraRefIds = (g.extraRefIds || []).filter(x => String(x) !== String(mid));
+        Storage.updateProject(this.projectId, { storyboardGroups: p.storyboardGroups });
+        this._showFgConfigModal(gid);
+        this.render(this.projectId);
+    },
+
+    // 通用图片选择器（单选，含人物/道具/场景图 + 四宫格/切割分镜），选定后回调 mediaId。
+    // 选完会自动回到四宫格配置弹窗（由各回调内 _showFgConfigModal 负责）。
+    _fgImagePicker(gid, title, onPick) {
+        const all = this._allImageAssets();
+        if (!all.length) { App.showToast('暂无可选图像，请先在人物/道具/场景页生成图，或生成四宫格', 'info'); return; }
+        const byGroup = {};
+        all.forEach(a => { (byGroup[a.group] = byGroup[a.group] || []).push(a); });
+        this._fgPickerCb = onPick;
+        this._fgPickerGid = gid;
+        const sections = Object.keys(byGroup).map(grp => `
+            <div class="sb-pick-section">
+                <div class="sb-pick-section-title">${grp}（${byGroup[grp].length}）</div>
+                <div class="sb-pick-grid">
+                    ${byGroup[grp].map(a => `
+                        <label class="sb-pick-cell" data-id="${a.id}" onclick="StoryboardModule._fgImagePicked('${a.id}')">
+                            <img src="${a.url}" loading="lazy">
+                            <span class="sb-pick-name">${this.esc(a.name)}</span>
+                        </label>`).join('')}
+                </div>
+            </div>`).join('');
+        const mc = document.getElementById('modalContent');
+        mc.innerHTML = `
+            <div class="modal-header"><h2 class="modal-title">${title}</h2><button class="modal-close" onclick="StoryboardModule._showFgConfigModal('${gid}')">×</button></div>
+            <div class="modal-body sb-pick-body">
+                <p class="form-hint">点击任意图像即可选用（含人物/道具/场景图、四宫格及其切割分镜）。</p>
+                ${sections}
+            </div>
+            <div class="modal-footer">
+                <button class="btn-secondary" onclick="StoryboardModule._showFgConfigModal('${gid}')">返回</button>
+            </div>`;
+        document.getElementById('modalOverlay').classList.add('active');
+    },
+
+    _fgImagePicked(mid) {
+        const cb = this._fgPickerCb;
+        this._fgPickerCb = null;
+        if (cb) cb(parseInt(mid));
+    },
+
+    // 通用：上传一张图写入分镜素材库（ownerType=storyboards），回调返回新 mediaId
+    _fgUploadToLib(gid, onDone) {
         const inp = document.createElement('input');
         inp.type = 'file'; inp.accept = 'image/*';
         inp.onchange = async e => {
@@ -1638,10 +1801,8 @@ const StoryboardModule = {
             r.onload = async ev => {
                 const data = ev.target.result;
                 const dims = await CharacterModule.computeDims(data);
-                await Storage.addItemImage(this.projectId, type, ownerId, data, dims);
-                App.showToast('✅ 已上传参考图', 'success');
-                this._showFgConfigModal(gid);  // 重新渲染配置弹窗
-                this.render(this.projectId);
+                const entry = await Storage._addMedia(this.projectId, 'image', 'storyboards', gid, data, null, dims);
+                if (onDone) onDone(entry.id);
             };
             r.readAsDataURL(f);
         };
@@ -1896,6 +2057,7 @@ const StoryboardModule = {
             return list.find(x => (x.name || '').trim() === (name || '').trim());
         };
         const typeToStorage = t => t === 'character' ? 'characters' : (t === 'prop' ? 'props' : 'scenes');
+        const manual = g.refManual || {};   // { "type:name": mediaId } 缺图时用户手动指定的图
         const push = (type, name) => {
             if (!name) return;
             const key = type + ':' + name;
@@ -1906,7 +2068,12 @@ const StoryboardModule = {
                 const m = Storage.getSelectedMedia(this.projectId, typeToStorage(type), item, 'image');
                 if (m) { url = Storage.mediaUrl(m.data); mediaId = m.id; missing = false; }
             }
-            out.push({ idx: out.length + 1, type, name, item, mediaId, url, missing });
+            // 缺图时若用户手动指定了某张库内图像，则用它补上（含切割分镜/上传图）
+            if (missing && manual[key] != null) {
+                const mm = Storage.getMediaById(this.projectId, manual[key]);
+                if (mm) { url = Storage.mediaUrl(mm.data); mediaId = mm.id; missing = false; }
+            }
+            out.push({ idx: out.length + 1, type, name, item, mediaId, url, missing, manualKey: key });
         };
 
         // ① 若 CC/Mock 标注了 ref_assets → 按其顺序
@@ -1934,6 +2101,13 @@ const StoryboardModule = {
         let sceneAdded = false;
         (p.scenes || []).forEach(x => { if (x.name && haystack.includes(x.name)) { push('scene', x.name); sceneAdded = true; } });
         if (!sceneAdded && (p.scenes || []).length) push('scene', p.scenes[0].name);
+
+        // ⑤ 用户手动添加的额外参考图（不依赖人物/道具/场景库，直接引用任意已生成图像/切割分镜/上传图）
+        (g.extraRefIds || []).forEach(mid => {
+            const m = Storage.getMediaById(this.projectId, mid);
+            if (!m) return;
+            out.push({ idx: out.length + 1, type: 'extra', name: '附加参考图', item: null, mediaId: m.id, url: Storage.mediaUrl(m.data), missing: false, extra: true, extraId: mid });
+        });
 
         return out.slice(0, 8);
     },

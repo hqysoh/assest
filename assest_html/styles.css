@@ -606,6 +606,11 @@ input[type="checkbox"]{accent-color:var(--ac)}
 .sb-local-no{font-size:1.1rem;font-weight:800;color:var(--t3)}
 .sb-local-main{display:flex;flex-direction:column;gap:0.25rem;min-width:0}
 .sb-local-prompt{font-size:0.74rem;color:var(--t1);line-height:1.45;word-break:break-word;width:100%}
+/* 转场描述行：独立展示在每个面板下方，浅色虚线上边框分隔 */
+.sb-trans-row{display:flex;align-items:center;gap:0.4rem;margin-top:0.3rem;padding-top:0.3rem;border-top:1px dashed var(--bd)}
+.sb-trans-ic{flex:none;font-size:0.62rem;font-weight:700;color:var(--ac2);background:var(--grad-soft);border:1px solid var(--bd);padding:0.08rem 0.4rem;border-radius:6px;white-space:nowrap}
+.sb-trans-text{flex:1;min-width:0;font-size:0.7rem;color:var(--t2);line-height:1.4;font-style:italic}
+.sb-trans-text.inline-edit:focus{font-style:normal}
 /* 移入主区底部的音频播放器：靠右、限制宽度，不再撑满整行 */
 .sb-local-main > .sb-local-player{width:260px;max-width:100%;align-self:flex-end;margin-top:0.15rem}
 .sb-local-idx{display:inline-block;font-size:0.6rem;font-weight:800;color:var(--ac2);background:var(--grad-soft);border:1px solid var(--bd);padding:0.05rem 0.35rem;border-radius:5px;margin-right:0.3rem;vertical-align:middle}
@@ -651,6 +656,13 @@ input[type="checkbox"]{accent-color:var(--ac)}
 .sb-fg-ref-miss{font-size:0.7rem;color:var(--err);font-weight:700}
 .sb-fg-ref-name{font-size:0.74rem;font-weight:700;color:var(--t1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .sb-fg-ref-type{font-size:0.62rem;color:var(--t3);font-weight:600;letter-spacing:.4px;text-transform:uppercase}
+/* 额外（手动添加）参考图：用主题色边框区分 */
+.sb-fg-ref-cell.is-extra{border-color:rgba(99,102,241,.4);background:rgba(99,102,241,.06)}
+/* 参考图单元的操作按钮区（选图/上传/更换/清除/删除） */
+.sb-fg-ref-acts{display:flex;flex-wrap:wrap;gap:0.25rem;justify-content:center;margin-top:0.1rem}
+.sb-fg-ref-acts .btn-tiny{padding:0.12rem 0.4rem;font-size:0.62rem}
+/* 清单底部「添加参考图」入口 */
+.sb-fg-ref-add{display:flex;flex-wrap:wrap;gap:0.4rem;margin-top:0.6rem;padding-top:0.6rem;border-top:1px dashed var(--bd)}
 
 /* 四宫格生成进度弹窗 */
 .sb-fg-prog{display:flex;gap:0.9rem;align-items:center;padding:0.9rem 1rem;background:var(--grad-soft);border:1px solid var(--bd);border-radius:var(--r-sm)}

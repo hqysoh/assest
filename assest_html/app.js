@@ -288,6 +288,9 @@ const InlineEdit = {
                 if (f === 'local') {
                     if (!Array.isArray(g.localPrompts)) g.localPrompts = ['', '', '', ''];
                     g.localPrompts[idx] = val;
+                } else if (f === 'shotTransition') {
+                    if (!Array.isArray(g.shotTransitions)) g.shotTransitions = ['', '', '', ''];
+                    g.shotTransitions[idx] = val;
                 } else {
                     // text / tone / character → dialogues[idx]
                     if (!Array.isArray(g.dialogues)) g.dialogues = [];

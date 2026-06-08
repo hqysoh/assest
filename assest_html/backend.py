@@ -304,6 +304,58 @@ def _extract_json_block(text):
     return None
 
 
+def _scan_dir_for_storyboard(od, since_ts=0, exclude=None):
+    """兜底：CC 有时会用 Write 工具把分镜 JSON 写成文件（如 storyboard_output.json），
+    而非在 stdout 输出 ```json 块。此时扫描工作目录下**以 storyboard 开头**的 *.json 文件，
+    提取含『分镜』/『person』的对象（只认 storyboard 前缀，避免误读目录里其它 json）。
+    since_ts: 只看该时间之后修改的文件；exclude: 要排除的文件名集合（如我们自己回写的 storyboard.json）。
+    返回 (result_obj, filepath) 或 (None, None)。"""
+    exclude = exclude or set()
+    try:
+        cands = []
+        for name in os.listdir(od):
+            low = name.lower()
+            if not (low.startswith('storyboard') and low.endswith('.json')):
+                continue
+            if name in exclude:
+                continue
+            fp = os.path.join(od, name)
+            try:
+                mt = os.path.getmtime(fp)
+            except Exception:
+                continue
+            if mt < since_ts - 1:   # 留 1s 容差
+                continue
+            cands.append((-mt, fp))   # 修改时间新的优先
+        cands.sort()
+        for _, fp in cands:
+            try:
+                with open(fp, 'r', encoding='utf-8', errors='ignore') as f:
+                    obj = _extract_json_block(f.read())
+                if obj and ('分镜' in obj or 'person' in obj):
+                    return obj, fp
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return None, None
+
+
+def _result_is_api_error(log_text):
+    """从 CC 输出里识别其自身的 API 错误（如连接被拒、限流），返回错误文案或 None。"""
+    for line in log_text.split('\n'):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except Exception:
+            continue
+        if obj.get('type') == 'result' and obj.get('is_error') and obj.get('result'):
+            return str(obj['result'])[:200]
+    return None
+
+
 def _run_storyboard_job(task_id, params):
     """调用 Claude Code 生成分镜 JSON。把剧本 + 已有人物/道具/场景上下文 + 分镜提示词
     一起喂给 CC，解析出 {person, 分镜}。"""
@@ -327,7 +379,10 @@ def _run_storyboard_job(task_id, params):
             "\n\n【已有人物/道具/场景设定（请复用，保持一致）】\n" +
             json.dumps(ctx, ensure_ascii=False, indent=2) +
             "\n\n【剧本文件路径】" + sp +
-            "\n\n请阅读剧本并严格按要求输出分镜 JSON（用 ```json 包裹）。"
+            "\n\n【输出要求（务必遵守）】请阅读剧本并严格按要求生成分镜 JSON。"
+            "最终结果请用 Write 工具写入当前工作目录下的文件 storyboard_output.json"
+            "（仅写这一个文件，内容是纯 JSON，不要带 ```json 围栏），"
+            "同时也把同样的 JSON 用 ```json 代码块输出到回复中。两者内容必须完全一致。"
         )
         pf = os.path.join(od, 'prompt.txt')
         with open(pf, 'w', encoding='utf-8') as f:
@@ -335,15 +390,19 @@ def _run_storyboard_job(task_id, params):
 
         lf = os.path.join(od, 'claude_output.txt')
         _safe_remove(lf)
+        # 清掉上一次 CC 写出的分镜文件，避免兜底扫描读到旧结果
+        _safe_remove(os.path.join(od, 'storyboard_output.json'))
         if _sb_job_cancelled(task_id):
             _sb_job_set(task_id, status='cancelled', error='已打断'); return
         _sb_job_set(task_id, status='running')
+        run_ts = time.time()
         log_text = run_claude_cc(pf, lf, timeout=600, cwd=od,
                                  on_proc=lambda pr: _sb_job_set(task_id, proc=pr))
         if _sb_job_cancelled(task_id):
             _sb_job_set(task_id, status='cancelled', error='已打断'); return
 
-        # 解析：先逐行找 result 事件里的 JSON，再兜底全文
+        # 解析：① 逐行找 result 事件里的 JSON；② 全文兜底；
+        # ③ 兜底扫描 CC 写出的 storyboard*.json 文件（CC 常用 Write 工具落盘而非 stdout 输出）
         result_obj = None
         for line in log_text.split('\n'):
             try:
@@ -356,6 +415,11 @@ def _run_storyboard_job(task_id, params):
                 continue
         if not result_obj:
             result_obj = _extract_json_block(log_text)
+        if not (result_obj and ('分镜' in result_obj or 'person' in result_obj)):
+            scanned, fp = _scan_dir_for_storyboard(od, since_ts=run_ts, exclude={'storyboard.json'})
+            if scanned:
+                print(f'[SB] 从 CC 写出的文件解析到分镜：{fp}')
+                result_obj = scanned
 
         if result_obj and ('分镜' in result_obj or 'person' in result_obj):
             with open(os.path.join(od, 'storyboard.json'), 'w', encoding='utf-8') as f:
@@ -366,7 +430,11 @@ def _run_storyboard_job(task_id, params):
                 'output': log_text[:4000],
             })
         else:
-            _sb_job_set(task_id, status='error', error='无法解析分镜 JSON（请检查 Claude 是否可用）')
+            api_err = _result_is_api_error(log_text)
+            if api_err:
+                _sb_job_set(task_id, status='error', error='Claude 调用失败：' + api_err)
+            else:
+                _sb_job_set(task_id, status='error', error='无法解析分镜 JSON（请检查 Claude 是否可用 / 输出是否包含分镜）')
     except subprocess.TimeoutExpired:
         _sb_job_set(task_id, status='error', error='分镜生成超时（CC 执行 >10 分钟）')
     except Exception as e:
