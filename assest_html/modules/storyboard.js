@@ -2640,6 +2640,7 @@ const StoryboardModule = {
         const imageClips = [];
         const audioClips = [];
         let cursor = 0;
+        const TRANS_DEF = Math.max(1, Math.round(this.FPS));   // 转场默认 1s
         segments.forEach(s => {
             const len = s.length || DEF;
             const imgUid = Storage._uid();
@@ -2647,8 +2648,6 @@ const StoryboardModule = {
                 uid: imgUid,
                 imageId: s.imageId, prompt: s.prompt || '',
                 dialogue: s.dialogue || {}, transition: s.transition || 'cut',
-                shotTransition: s.shotTransition || '',   // 镜头语言/转场文本（AI 生成，可编辑）
-                transitionDur: (s.shotTransition || '').trim() ? 1 : 0,  // 有转场文本则默认 1s
                 start: cursor, length: len,
             });
             if (s.audioId != null) {
@@ -2664,6 +2663,17 @@ const StoryboardModule = {
                 });
             }
             cursor += len;
+            // 该段若带转场文本 → 作为独立「转场块」插入其后（黑底纯文本段，计入总时长）
+            const tText = (s.shotTransition || '').trim();
+            if (tText) {
+                imageClips.push({
+                    uid: Storage._uid(),
+                    type: 'trans',           // 转场块：无图无音频，只有 local 提示词
+                    prompt: tText,
+                    start: cursor, length: TRANS_DEF,
+                });
+                cursor += TRANS_DEF;
+            }
         });
 
         this._tl = {
@@ -2743,6 +2753,7 @@ const StoryboardModule = {
             <div class="modal-body sb-dir-body">
                 <div class="sb-dir-toolbar">
                     <button class="btn-ghost btn-tiny" onclick="StoryboardModule.tlAddImage()">🖼️ 添加图像</button>
+                    <button class="btn-ghost btn-tiny" onclick="StoryboardModule.tlAddText()">🆃 添加 txt</button>
                     <button class="btn-ghost btn-tiny" onclick="StoryboardModule.tlAddAudio()">🎵 添加音频</button>
                     <span class="sb-dir-sep"></span>
                     <label class="sb-dir-total">视频总长
@@ -2898,6 +2909,23 @@ const StoryboardModule = {
         const secsLabel = (c.length / tl.fps).toFixed(1) + 's';
         // 块下方独立时长标签：clip 再窄也不会被挡（绝对定位在块正下方，居中显示）
         const secBelow = `<div class="sb-dir-clip-sec" style="left:${left}px;width:${width}px">${secsLabel}</div>`;
+        if (kind === 'img' && c.type === 'trans') {
+            // 转场块：黑底，只显示 local 文字；可选中/拖动换位/拉两侧改时长/删除
+            const selected = (c.uid === tl.selectedUid);
+            const txt = c.prompt ? this.esc(c.prompt) : '';
+            return `<div class="sb-dir-clip sb-dir-trans ${overflow ? 'sb-dir-of' : ''} ${selected ? 'sb-dir-sel' : ''}" data-kind="img" data-uid="${c.uid}" data-i="${i}"
+                style="left:${left}px;width:${width}px">
+                ${overflow ? '<div class="sb-dir-of-badge" title="超出视频总长，不会被合成">超出</div>' : ''}
+                <div class="sb-dir-handle l" data-h="l" title="拖动改时长（后续片段跟随移动）"></div>
+                <div class="sb-dir-clip-body" title="转场文本段（无图无音频）· 点击在下方编辑 local 提示词 / 拖动换位 / 拉两侧改时长">
+                    <span class="sb-dir-trans-tag">T 转场</span>
+                    <span class="sb-dir-clip-meta">#${i + 1} · ${secsLabel}</span>
+                    ${txt ? `<span class="sb-dir-trans-text" title="${txt}">${txt}</span>` : '<span class="sb-dir-trans-empty">（空转场·点此编辑文字）</span>'}
+                    <button class="sb-dir-clip-x" title="删除" onmousedown="event.stopPropagation()" onclick="StoryboardModule.tlDelClip('img','${c.uid}')">×</button>
+                </div>
+                <div class="sb-dir-handle r" data-h="r" title="拖动改时长（后续片段跟随移动）"></div>
+            </div>${secBelow}`;
+        }
         if (kind === 'img') {
             const m = c.imageId != null ? Storage.getMediaById(this.projectId, c.imageId) : null;
             const url = m ? Storage.mediaUrl(m.data) : '';
@@ -3257,6 +3285,30 @@ const StoryboardModule = {
             this._renderTimeline();
         });
     },
+    // 添加一个纯文本「转场块」（无图无音频，只有 local 提示词），默认 1s。
+    // 插在当前选中块之后，没有选中则插到末尾；插入后选中它，方便立即在下方编辑文字。
+    tlAddText() {
+        const tl = this._tl; if (!tl) return;
+        const TRANS_DEF = Math.max(1, Math.round(tl.fps));
+        const clip = { uid: Storage._uid(), type: 'trans', prompt: '', start: 0, length: TRANS_DEF };
+        const selIdx = tl.imageClips.findIndex(c => c.uid === tl.selectedUid);
+        // 插入点处的「原始帧位置」（用于把其后的音频块整体右移，保持图音对齐）
+        const insertAtFrame = (selIdx >= 0)
+            ? (tl.imageClips[selIdx].start + tl.imageClips[selIdx].length)
+            : tl.imageClips.reduce((mx, c) => Math.max(mx, c.start + c.length), 0);
+        if (selIdx >= 0) tl.imageClips.splice(selIdx + 1, 0, clip);
+        else tl.imageClips.push(clip);
+        this._relayoutImages();
+        // 插入点之后的音频整体后移，让出转场时长（图音保持同步）
+        tl.audioClips.forEach(a => { if (a.start >= insertAtFrame) a.start += TRANS_DEF; });
+        // 总时长相应增加
+        tl.totalFrames = (tl.totalFrames || 0) + TRANS_DEF;
+        tl.selectedUid = clip.uid;
+        this._renderTimeline();
+        // 让下方编辑区聚焦到文本输入
+        const area = document.getElementById('tlPrevPrompt');
+        if (area) area.focus();
+    },
     tlAddAudio() {
         this._openMediaPicker('audio', (mid) => {
             const tl = this._tl;
@@ -3408,35 +3460,25 @@ const StoryboardModule = {
         const talkBar = talk
             ? `<div class="sb-dir-prev-talk"><span class="sb-dir-prev-talk-icon">🗣️</span><span class="sb-dir-prev-talk-text">${this.esc(talk)}</span></div>`
             : '';
-        // 转场区：仅对「非最后一段」显示（最后一段后面没有下一镜头，无需转场）
-        const isLast = c ? (tl.imageClips.indexOf(c) === tl.imageClips.length - 1) : true;
-        const transVal = c ? (c.shotTransition || '') : '';
-        const transDur = c ? (c.transitionDur != null ? c.transitionDur : 1) : 1;
-        const transBlock = (c && !isLast) ? `
-            <div class="sb-dir-prev-trans">
-                <div class="sb-dir-prev-phead">
-                    <span class="sb-dir-prev-plabel">🎞️ 镜头语言 / 与下一镜头的转场描述</span>
-                    <label class="sb-dir-trans-dur">转场时长
-                        <input type="number" id="tlTransDur" min="0" max="5" step="0.5" value="${transDur}"
-                            oninput="StoryboardModule.tlSetTransDur('${c.uid}', this.value)"> 秒
-                    </label>
-                </div>
-                <textarea class="form-textarea sb-dir-prev-tarea" id="tlPrevTrans"
-                    placeholder="描述本镜头到下一镜头的过渡 / 镜头语言（如：镜头缓慢推近、淡入下一场景、人物转身离开…）。无字幕。留空则不插入转场段。"
-                    oninput="StoryboardModule.tlSetTrans('${c.uid}', this.value)">${this.esc(transVal)}</textarea>
-            </div>` : '';
+        // 选中的是「转场块」：只显示 local 提示词编辑（无图无音频），不显示镜头语言块
+        const isTrans = !!(c && c.type === 'trans');
+        const promptLabel = isTrans
+            ? `🆃 转场段 · local 提示词`
+            : `✎ 第 ${idx} 段 · local 提示词`;
+        const promptPlaceholder = isTrans
+            ? '输入这段转场的 local 提示词（纯文本段，无图无音频，会按顺序插入两段之间）…'
+            : '描述这一段的画面内容…（local 提示词）';
         host.innerHTML = c ? `
-            ${talkBar}
+            ${isTrans ? '' : talkBar}
             <div class="sb-dir-prev-prompt">
                 <div class="sb-dir-prev-phead">
-                    <span class="sb-dir-prev-plabel">✎ 第 ${idx} 段 · local 提示词</span>
-                    <span class="sb-dir-prev-phint">${tl.playing ? '播放中（跟随播放头）' : '点击上方图像段切换 · 编辑后自动保存'}</span>
+                    <span class="sb-dir-prev-plabel">${promptLabel}</span>
+                    <span class="sb-dir-prev-phint">${tl.playing ? '播放中（跟随播放头）' : (isTrans ? '转场文本段 · 编辑后自动保存' : '点击上方图像段切换 · 编辑后自动保存')}</span>
                 </div>
                 <textarea class="form-textarea sb-dir-prev-parea" id="tlPrevPrompt"
-                    placeholder="描述这一段的画面内容…（local 提示词）"
+                    placeholder="${promptPlaceholder}"
                     oninput="StoryboardModule.tlSetPrompt('${c.uid}', this.value)">${this.esc(promptVal)}</textarea>
-            </div>
-            ${transBlock}`
+            </div>`
             : `<div class="sb-dir-prev-empty">点击上方图像段，可在此查看 / 编辑该段的 local 提示词</div>`;
         this._prevUid = c ? c.uid : null;
         this._prevTalk = talk;
@@ -3479,10 +3521,33 @@ const StoryboardModule = {
         const c = this._tl && this._tl.imageClips.find(x => x.uid === uid);
         if (!c) return;
         c.prompt = v;
-        // 只更新对应块底部的提示词 span，不整轨重绘（避免打断 textarea 输入）
         const host = document.getElementById('sbDirTracks');
         const el = host && host.querySelector(`.sb-dir-clip[data-uid="${uid}"][data-kind="img"] .sb-dir-clip-body`);
         if (!el) return;
+        // 转场块：更新黑底块上的转场文字（无文字时显示占位）
+        if (c.type === 'trans') {
+            let t = el.querySelector('.sb-dir-trans-text');
+            let empty = el.querySelector('.sb-dir-trans-empty');
+            if (v) {
+                if (empty) empty.remove();
+                if (!t) {
+                    t = document.createElement('span');
+                    t.className = 'sb-dir-trans-text';
+                    el.insertBefore(t, el.querySelector('.sb-dir-clip-x'));
+                }
+                t.textContent = v; t.title = v;
+            } else {
+                if (t) t.remove();
+                if (!empty) {
+                    empty = document.createElement('span');
+                    empty.className = 'sb-dir-trans-empty';
+                    empty.textContent = '（空转场·点此编辑文字）';
+                    el.insertBefore(empty, el.querySelector('.sb-dir-clip-x'));
+                }
+            }
+            return;
+        }
+        // 普通图像段：更新块底叠加的 local 提示词 span（不整轨重绘，避免打断输入）
         let span = el.querySelector('.sb-dir-clip-prompt');
         if (v) {
             if (!span) {
@@ -3495,21 +3560,6 @@ const StoryboardModule = {
         } else if (span) {
             span.remove();
         }
-    },
-    // 转场描述：与下一镜头之间的过渡/镜头语言文本，写回到当前图像段（轻量，不重绘轨道）
-    tlSetTrans(uid, v) {
-        const c = this._tl && this._tl.imageClips.find(x => x.uid === uid);
-        if (!c) return;
-        c.shotTransition = v;
-    },
-    // 转场时长（秒）：合成时该段后插入的纯文本转场段长度，0=不插入
-    tlSetTransDur(uid, v) {
-        const c = this._tl && this._tl.imageClips.find(x => x.uid === uid);
-        if (!c) return;
-        let n = parseFloat(v);
-        if (isNaN(n) || n < 0) n = 0;
-        n = Math.min(5, n);   // 上限 5s
-        c.transitionDur = n;
     },
     // 音频同步：找到命中当前帧的音频块，定位 audio 元素到 (trimStart + 帧偏移)
     _syncAudioToFrame() {
@@ -3588,6 +3638,15 @@ const StoryboardModule = {
         const imageSegments = [];
         for (const c of [...tl.imageClips].sort((a, b) => a.start - b.start)) {
             if (c.start >= total) continue;                 // 完全超出 → 不合成
+            if (c.type === 'trans') {
+                // 转场块：纯文本段（无图无音频），按顺序占位发给后端
+                imageSegments.push({
+                    is_text: true,
+                    prompt: (c.prompt || '').trim(),
+                    start: c.start, length: clampLen(c),
+                });
+                continue;
+            }
             const img = c.imageId != null ? Storage.getMediaById(this.projectId, c.imageId) : null;
             if (!img) continue;
             const b64 = await this._urlToB64(Storage.mediaUrl(img.data));
@@ -3595,12 +3654,10 @@ const StoryboardModule = {
                 image_b64: b64,
                 prompt: c.prompt || (c.dialogue && c.dialogue.text) || '',
                 start: c.start, length: clampLen(c),
-                // 镜头语言 / 与下一镜头的转场：后端据此在段间插入一个无图的纯文本过渡段
-                transition: (c.shotTransition || '').trim(),
-                transition_dur: (c.transitionDur != null ? c.transitionDur : 0),
             });
         }
-        if (!imageSegments.length) { resEl.innerHTML = '<div class="sb-err">❌ 没有落在总时长范围内的图像段</div>'; return; }
+        // 至少要有一个带图的段（编辑接口/合成需要画面）
+        if (!imageSegments.some(s => !s.is_text)) { resEl.innerHTML = '<div class="sb-err">❌ 没有落在总时长范围内的图像段</div>'; return; }
 
         const audioSegments = [];
         for (const c of [...tl.audioClips].sort((a, b) => a.start - b.start)) {
