@@ -228,6 +228,7 @@ const CharacterModule = {
     renderRow(c, idx) {
         const img = Storage.getSelectedMedia(this.projectId, 'characters', c, 'image');
         const au = Storage.getSelectedMedia(this.projectId, 'characters', c, 'audio');
+        const imgHistCount = Storage.getMediaForItem(this.projectId, 'characters', c.id).filter(m => m.type === 'image').length;
         const srcTag = c.source === 'cc' ? 'cc' : 'man';
         const dimInfo = this.imgDimLabel(img);
         const genTask = this._genTasks[c.id];
@@ -249,7 +250,7 @@ const CharacterModule = {
                 <div class="list-img-btns">
                     <button class="btn-ghost btn-tiny ${genTask ? 'btn-disabled' : ''}" id="genCardBtn_${c.id}" onclick="${genTask ? '' : `CharacterModule.generateImage('${c.id}')`}">${genTask ? '⏳ 生成' : '🎨 生成'}</button>
                     <button class="btn-ghost btn-tiny" onclick="CharacterModule.uploadImage('${c.id}')">📁 上传</button>
-                    <button class="btn-ghost btn-tiny" onclick="CharacterModule.showHistoryModal('${c.id}')">📷 历史</button>
+                    <button class="btn-ghost btn-tiny" onclick="CharacterModule.showHistoryModal('${c.id}')">📷 历史${imgHistCount ? `(${imgHistCount})` : ''}</button>
                 </div>
             </div>
             <div class="list-row-body">

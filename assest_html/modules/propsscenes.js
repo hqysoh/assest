@@ -14,6 +14,7 @@ const PropsScenesModule = {
     },
     renderRow(i, idx, t) {
         const img = Storage.getSelectedMedia(this.projectId, t, i, 'image');
+        const imgHistCount = Storage.getMediaForItem(this.projectId, t, i.id).filter(m => m.type === 'image').length;
         const srcTag = i.source === 'cc' ? 'cc' : 'man';
         const pd = CharacterModule.imgDimLabel(img);
         const genTask = CharacterModule._genTasks[i.id];
@@ -32,7 +33,7 @@ const PropsScenesModule = {
                 <div class="list-img-btns">
                     <button class="btn-ghost btn-tiny ${genTask ? 'btn-disabled' : ''}" id="genCardBtn_${i.id}" onclick="${genTask ? '' : `PropsScenesModule.genImg('${i.id}')`}">${genTask ? '⏳ 生成' : '🎨 生成'}</button>
                     <button class="btn-ghost btn-tiny" onclick="PropsScenesModule.upload('${i.id}')">📁 上传</button>
-                    <button class="btn-ghost btn-tiny" onclick="PropsScenesModule.showHist('${i.id}')">📷 历史</button>
+                    <button class="btn-ghost btn-tiny" onclick="PropsScenesModule.showHist('${i.id}')">📷 历史${imgHistCount ? `(${imgHistCount})` : ''}</button>
                 </div>
             </div>
             <div class="list-row-body">
