@@ -1640,13 +1640,18 @@ const StoryboardModule = {
                 // 额外参考图：可删除
                 actions = `<button class="btn-ghost btn-tiny" onclick="StoryboardModule._fgRemoveExtra('${gid}','${a.extraId}')">✕ 删除</button>`;
             } else if (a.missing) {
-                // 缺图：选已生成图 / 上传（手动补到 refManual[key]）
+                // 缺图：选已生成图 / 上传（手动补到 refManual[key]）+ 可整项移除
                 actions = `<button class="btn-ghost btn-tiny" onclick="StoryboardModule._fgPickForMissing('${gid}','${mk}')">🖼️ 选图</button>
-                    <button class="btn-ghost btn-tiny" onclick="StoryboardModule._fgUploadForMissing('${gid}','${mk}')">📁 上传</button>`;
+                    <button class="btn-ghost btn-tiny" onclick="StoryboardModule._fgUploadForMissing('${gid}','${mk}')">📁 上传</button>
+                    <button class="btn-ghost btn-tiny" onclick="StoryboardModule._fgExcludeRef('${gid}','${mk}')">✕ 移除</button>`;
             } else if (isManual) {
-                // 手动补过的图：可更换 / 清除（恢复缺图状态）
+                // 手动补过的图：可更换 / 清除（恢复缺图状态）+ 可整项移除
                 actions = `<button class="btn-ghost btn-tiny" onclick="StoryboardModule._fgPickForMissing('${gid}','${mk}')">🔄 更换</button>
-                    <button class="btn-ghost btn-tiny" onclick="StoryboardModule._fgClearManual('${gid}','${mk}')">✕ 清除</button>`;
+                    <button class="btn-ghost btn-tiny" onclick="StoryboardModule._fgClearManual('${gid}','${mk}')">↺ 清除</button>
+                    <button class="btn-ghost btn-tiny" onclick="StoryboardModule._fgExcludeRef('${gid}','${mk}')">✕ 移除</button>`;
+            } else {
+                // 自动识别的人物/道具/场景图：可整项移除（@图索引会自动重排）
+                actions = `<button class="btn-ghost btn-tiny" onclick="StoryboardModule._fgExcludeRef('${gid}','${mk}')">✕ 移除</button>`;
             }
 
             return `<div class="sb-fg-ref-cell ${a.missing ? 'is-miss' : ''} ${a.extra ? 'is-extra' : ''}">
@@ -1659,9 +1664,11 @@ const StoryboardModule = {
         }).join('');
 
         // 底部「添加参考图」入口（追加额外参考图，不依赖人物/道具/场景库）
+        const excludedCount = (((Storage.getProject(this.projectId).storyboardGroups || []).find(x => x.id === gid) || {}).refExcluded || []).length;
         const addBtn = `<div class="sb-fg-ref-add">
             <button class="btn-ghost btn-tiny" onclick="StoryboardModule._fgAddExtra('${gid}')">＋ 添加参考图（选已生成图/切割分镜）</button>
             <button class="btn-ghost btn-tiny" onclick="StoryboardModule._fgUploadExtra('${gid}')">📁 上传新图</button>
+            ${excludedCount ? `<button class="btn-ghost btn-tiny" onclick="StoryboardModule._fgRestoreExcluded('${gid}')">↺ 恢复已移除（${excludedCount}）</button>` : ''}
         </div>`;
 
         return `<div class="sb-fg-ref-grid">${grid || '<div class="form-hint">未识别到任何参考资产</div>'}</div>${addBtn}`;
@@ -1748,6 +1755,35 @@ const StoryboardModule = {
         if (!g) return;
         g.extraRefIds = (g.extraRefIds || []).filter(x => String(x) !== String(mid));
         Storage.updateProject(this.projectId, { storyboardGroups: p.storyboardGroups });
+        this._showFgConfigModal(gid);
+        this.render(this.projectId);
+    },
+
+    // 移除某个自动识别的参考图（人物/道具/场景）：加入排除列表，后续 @图索引自动重排。
+    // 同时清掉它可能存在的手动补图，保持数据干净。
+    _fgExcludeRef(gid, encKey) {
+        const key = decodeURIComponent(encKey || '');
+        if (!key) return;
+        const p = Storage.getProject(this.projectId);
+        const g = (p.storyboardGroups || []).find(x => x.id === gid);
+        if (!g) return;
+        g.refExcluded = g.refExcluded || [];
+        if (!g.refExcluded.includes(key)) g.refExcluded.push(key);
+        if (g.refManual && g.refManual[key] != null) delete g.refManual[key];
+        Storage.updateProject(this.projectId, { storyboardGroups: p.storyboardGroups });
+        App.showToast('已移除该参考图，@图索引已重排', 'success');
+        this._showFgConfigModal(gid);
+        this.render(this.projectId);
+    },
+
+    // 恢复本组所有被移除的自动识别参考图
+    _fgRestoreExcluded(gid) {
+        const p = Storage.getProject(this.projectId);
+        const g = (p.storyboardGroups || []).find(x => x.id === gid);
+        if (!g) return;
+        g.refExcluded = [];
+        Storage.updateProject(this.projectId, { storyboardGroups: p.storyboardGroups });
+        App.showToast('已恢复被移除的参考图', 'success');
         this._showFgConfigModal(gid);
         this.render(this.projectId);
     },
@@ -2058,9 +2094,11 @@ const StoryboardModule = {
         };
         const typeToStorage = t => t === 'character' ? 'characters' : (t === 'prop' ? 'props' : 'scenes');
         const manual = g.refManual || {};   // { "type:name": mediaId } 缺图时用户手动指定的图
+        const excluded = new Set(g.refExcluded || []);   // 用户手动移除的素材（type:name），不再出现在清单中
         const push = (type, name) => {
             if (!name) return;
             const key = type + ':' + name;
+            if (excluded.has(key)) return;   // 已被移除 → 跳过（out.length 不增，@图索引自动重排）
             if (seen.has(key)) return; seen.add(key);
             const item = findItem(type, name);
             let url = '', mediaId = null, missing = true;
