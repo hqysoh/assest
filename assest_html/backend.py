@@ -896,6 +896,42 @@ def comfy_upload_file(raw_bytes, filename, subfolder=""):
     return (f"{sf}/{name}" if sf else name)
 
 
+def comfy_cleanup_input_files(names):
+    """用完即删：清理本次上传到 ComfyUI input 目录的临时图。
+
+    backend 与 ComfyUI 同机，input 目录即 COMFYUI_BASE/input。
+    仅删传入的文件名（如 sbimg_*.png），删不到/无目录则静默跳过，绝不影响主流程。
+    names: comfy_upload_file 返回的文件名列表（可能含 subfolder 前缀 "sub/name"）。
+    """
+    try:
+        if not names:
+            return
+        if not COMFYUI_BASE:
+            try:
+                find_comfyui_dirs()
+            except Exception:
+                pass
+        if not COMFYUI_BASE:
+            return
+        input_dir = os.path.join(COMFYUI_BASE, "input")
+        if not os.path.isdir(input_dir):
+            return
+        for nm in names:
+            if not nm:
+                continue
+            # 仅允许删 input 目录内、规范化后仍在该目录下的文件，防止路径穿越
+            p = os.path.normpath(os.path.join(input_dir, nm))
+            if os.path.commonpath([input_dir, p]) != input_dir:
+                continue
+            try:
+                if os.path.isfile(p):
+                    os.remove(p)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
 class JobCancelled(Exception):
     """任务被用户主动打断。"""
     pass
@@ -1090,8 +1126,9 @@ def run_director_singularity_sync(params, task_id=None):
         ],
         "total_length": <总帧>, "frame_rate": <fps>
       }
-    图像上传到 ComfyUI input 后用同源 /api/view url 引用；音频默认不走编辑器（节点99=false），
-    由模型按 text 中的对白描述生成语音。
+    图像上传到 ComfyUI input 后用 source_type="input" + file_path 本地引用（不要用 url，
+    否则节点会经 urllib + 本机代理下载 127.0.0.1 失败，导致图丢失、PromptRelay 回退 704x480）；
+    音频默认不走编辑器（节点99=false），由模型按 text 中的对白描述生成语音。
 
     入参同新版双轨：imageSegments[{image_b64, prompt, start, length, transition, transition_dur}]、
     total_frames、global_prompt、epsilon、fps 等（audioSegments 在本工作流中不直接使用）。
@@ -1114,27 +1151,30 @@ def run_director_singularity_sync(params, task_id=None):
     # 组装 easy timelineEditor 的 maintain 轨道（按 cursor 顺序紧贴排布，含转场段）
     main_segments = []
     cursor = 0
+    uploaded_names = []   # 本次上传到 input 的临时图，结束后清理
     for i, seg in enumerate(img_segs):
         length = max(1, int(seg.get('length', 90)))
-        img_url = ''
         img_name = ''
         if seg.get('image_b64'):
             try:
                 raw = base64.b64decode(seg['image_b64'])
                 img_name = comfy_upload_file(raw, f"sbimg_{int(time.time()*1000)}_{i}.png")
+                uploaded_names.append(img_name)
             except Exception as e:
+                comfy_cleanup_input_files(uploaded_names)
                 return {'success': False, 'error': f'第{i+1}个图像段上传失败: {e}'}
-            # 同源 ComfyUI view url（input 目录）
-            img_url = f"{COMFYUI_URL}/api/view?filename={img_name}&type=input&subfolder="
+        # 关键：图已上传到 ComfyUI input 目录，直接用 source_type="input" + file_path 本地读取，
+        # 不要用 url（easy timelineEditor 的 load_image_tensor 解析 url 会走 urllib，
+        # 受本机代理影响访问 127.0.0.1:8188 失败 → 图丢失 → PromptRelay 回退 704x480）。
         content = {
             'text': seg.get('prompt', '') or '',
             'images': ([{
-                'source_type': 'url',
-                'url': img_url,
+                'source_type': 'input',
+                'file_path': img_name,
                 'file_name': img_name,
                 'start_frame': 0,
                 'end_frame': length,
-            }] if img_url else []),
+            }] if img_name else []),
             'type': 'flf',
         }
         main_segments.append({
@@ -1180,41 +1220,45 @@ def run_director_singularity_sync(params, task_id=None):
     }
     timeline_data = json.dumps(timeline_obj, ensure_ascii=False)
 
-    # 注入工作流：easy timelineEditor 的 timeline_data；epsilon（PromptRelaySmartEncode）；
-    # 随机化两个 Stage 种子；Using Editor Audio 保持 false（由模型生成语音）。
-    epsilon = float(params.get('epsilon', 0.25))
+    # 注入工作流：仅写 easy timelineEditor 的 timeline_data 与 global_prompt（前端没传则保留 JSON 原值）；
+    # 随机化两个 Stage 种子（Stage1/Stage2 都参与，保证两阶段采样每次出片不同）；
+    # epsilon 不注入，完全沿用工作流 JSON 节点21 的默认值（0.25）；
+    # Using Editor Audio 保持 false（由模型按 text 中的对白生成语音）。
     for nid, node in workflow.items():
         ct = node.get('class_type')
         if ct == 'easy timelineEditor':
             node['inputs']['timeline_data'] = timeline_data
         elif ct == 'PromptRelaySmartEncode':
-            node['inputs']['epsilon'] = epsilon
             if 'global_prompt' in node['inputs']:
                 node['inputs']['global_prompt'] = params.get('global_prompt', '') or node['inputs'].get('global_prompt', '')
         elif ct == 'PrimitiveInt' and (node.get('_meta', {}) or {}).get('title', '').lower().startswith('stage'):
             node['inputs']['value'] = random.randint(1, 2**31)
 
     try:
-        found, _ = comfy_run_and_wait(
-            workflow, want_kinds=('gifs', 'images', 'audio'), max_wait=3600,
-            on_prompt_id=(lambda pid: _sb_job_set(task_id, prompt_id=pid)) if task_id else None,
-            should_cancel=(lambda: _sb_job_cancelled(task_id)) if task_id else None,
-        )
-    except JobCancelled:
-        return {'success': False, 'cancelled': True, 'error': '已打断'}
-    except Exception as e:
-        return {'success': False, 'error': str(e)}
-    item = None
-    for key in ('gifs', 'images', 'audio'):
-        if found.get(key):
-            item = found[key][0]; break
-    if not item:
-        return {'success': False, 'error': 'Singularity 导演台未产出视频'}
-    content = comfy_fetch_view(item.get('filename', ''), item.get('subfolder', ''), item.get('type', 'output'))
-    if not content:
-        return {'success': False, 'error': '无法取回视频文件'}
-    return {'success': True, 'video_base64': base64.b64encode(content).decode('utf-8'),
-            'mime': 'video/mp4', 'frames': total_frames}
+        try:
+            found, _ = comfy_run_and_wait(
+                workflow, want_kinds=('gifs', 'images', 'audio'), max_wait=3600,
+                on_prompt_id=(lambda pid: _sb_job_set(task_id, prompt_id=pid)) if task_id else None,
+                should_cancel=(lambda: _sb_job_cancelled(task_id)) if task_id else None,
+            )
+        except JobCancelled:
+            return {'success': False, 'cancelled': True, 'error': '已打断'}
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
+        item = None
+        for key in ('gifs', 'images', 'audio'):
+            if found.get(key):
+                item = found[key][0]; break
+        if not item:
+            return {'success': False, 'error': 'Singularity 导演台未产出视频'}
+        content = comfy_fetch_view(item.get('filename', ''), item.get('subfolder', ''), item.get('type', 'output'))
+        if not content:
+            return {'success': False, 'error': '无法取回视频文件'}
+        return {'success': True, 'video_base64': base64.b64encode(content).decode('utf-8'),
+                'mime': 'video/mp4', 'frames': total_frames}
+    finally:
+        # 用完即删：无论成功/失败/取消，都清理本次上传到 input 的临时图
+        comfy_cleanup_input_files(uploaded_names)
 
 
 def run_director_sync(params, task_id=None):
