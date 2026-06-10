@@ -43,6 +43,8 @@ SB_JOB_TTL = 3600          # 分镜/视频类任务保留 1 小时（生成更�
 
 # 导演台 / TTS 克隆工作流路径
 DIRECTOR_WORKFLOW_PATH = os.path.join(os.path.dirname(__file__), "..", "workflow-api", "AI代码侠土豆-LTX2.3导演台工作流.json")
+# Singularity（乱神版 V3）导演台工作流：基于 easy timelineEditor 的 timeline_data 格式
+DIRECTOR_SINGULARITY_WORKFLOW_PATH = os.path.join(os.path.dirname(__file__), "..", "workflow-api", "Ltx2.3 Singularity+EasyMedia导演工作台(乱神版)V3.json")
 TTS_CLONE_WORKFLOW_PATH = os.path.join(os.path.dirname(__file__), "..", "workflow-api", "vocpm语音克隆.json")
 
 
@@ -1070,6 +1072,151 @@ def _convert_ui_workflow_to_api(ui_wf):
     return None
 
 
+def run_director_singularity_sync(params, task_id=None):
+    """Singularity（乱神版 V3）导演台视频生成。
+
+    与旧 LTXDirector 不同，本工作流通过 `easy timelineEditor` 节点的 timeline_data 驱动，
+    格式为：
+      {
+        "tracks": [
+          { "type": "maintain", "segments": [
+              { "start_frame", "end_frame",
+                "content": { "text": <local_prompt 含中文对白>,
+                             "images": [{ "source_type":"url", "url":..., "file_name":...,
+                                          "start_frame":0, "end_frame": <段长> }],
+                             "type": "flf" } }
+          ]},
+          { "type": "audio", "segments": [] }
+        ],
+        "total_length": <总帧>, "frame_rate": <fps>
+      }
+    图像上传到 ComfyUI input 后用同源 /api/view url 引用；音频默认不走编辑器（节点99=false），
+    由模型按 text 中的对白描述生成语音。
+
+    入参同新版双轨：imageSegments[{image_b64, prompt, start, length, transition, transition_dur}]、
+    total_frames、global_prompt、epsilon、fps 等（audioSegments 在本工作流中不直接使用）。
+    """
+    if not os.path.exists(DIRECTOR_SINGULARITY_WORKFLOW_PATH):
+        return {'success': False, 'error': '未找到 Singularity 导演台工作流文件'}
+    with open(DIRECTOR_SINGULARITY_WORKFLOW_PATH, 'r', encoding='utf-8') as f:
+        workflow = json.load(f)
+
+    fps = int(params.get('fps', 30))
+    img_segs = sorted(params.get('imageSegments') or [], key=lambda s: int(s.get('start', 0)))
+    if not img_segs:
+        # 兼容旧版成对格式
+        segs = params.get('segments') or []
+        img_segs = [{'image_b64': s.get('image_b64', ''), 'prompt': s.get('prompt', ''),
+                     'start': 0, 'length': int(s.get('length', 90))} for s in segs]
+    if not img_segs:
+        return {'success': False, 'error': '缺少图像段'}
+
+    # 组装 easy timelineEditor 的 maintain 轨道（按 cursor 顺序紧贴排布，含转场段）
+    main_segments = []
+    cursor = 0
+    for i, seg in enumerate(img_segs):
+        length = max(1, int(seg.get('length', 90)))
+        img_url = ''
+        img_name = ''
+        if seg.get('image_b64'):
+            try:
+                raw = base64.b64decode(seg['image_b64'])
+                img_name = comfy_upload_file(raw, f"sbimg_{int(time.time()*1000)}_{i}.png")
+            except Exception as e:
+                return {'success': False, 'error': f'第{i+1}个图像段上传失败: {e}'}
+            # 同源 ComfyUI view url（input 目录）
+            img_url = f"{COMFYUI_URL}/api/view?filename={img_name}&type=input&subfolder="
+        content = {
+            'text': seg.get('prompt', '') or '',
+            'images': ([{
+                'source_type': 'url',
+                'url': img_url,
+                'file_name': img_name,
+                'start_frame': 0,
+                'end_frame': length,
+            }] if img_url else []),
+            'type': 'flf',
+        }
+        main_segments.append({
+            'id': f"seg{i}-{random.randint(100000,999999)}",
+            'start_frame': cursor,
+            'end_frame': cursor + length,
+            'content': content,
+            'color': 'var(--secondary)',
+        })
+        cursor += length
+
+        # 相邻段之间插入转场段（无图、纯文本），最后一段不插
+        trans_text = str(seg.get('transition', '') or '').strip()
+        trans_frames = int(round(float(seg.get('transition_dur', 0) or 0) * fps))
+        if i < len(img_segs) - 1 and trans_text and trans_frames > 0:
+            trans_prompt = trans_text if '无字幕' in trans_text else (trans_text + '，无字幕')
+            main_segments.append({
+                'id': f"trans{i}-{random.randint(100000,999999)}",
+                'start_frame': cursor,
+                'end_frame': cursor + trans_frames,
+                'content': {'text': trans_prompt, 'images': [], 'type': 'flf'},
+                'color': 'var(--secondary)',
+            })
+            cursor += trans_frames
+
+    total_frames = max(int(params.get('total_frames') or 0), cursor)
+
+    timeline_obj = {
+        'tracks': [
+            {
+                'id': f"track-main-{random.randint(100000,999999)}",
+                'name': '主轨 1', 'type': 'maintain', 'color': 'var(--secondary)',
+                'muted': False, 'locked': False, 'segments': main_segments,
+            },
+            {
+                'id': f"track-audio-{random.randint(100000,999999)}",
+                'name': '音频轨 1', 'type': 'audio', 'color': '#34d399',
+                'muted': False, 'locked': False, 'segments': [],
+            },
+        ],
+        'total_length': total_frames,
+        'frame_rate': fps,
+    }
+    timeline_data = json.dumps(timeline_obj, ensure_ascii=False)
+
+    # 注入工作流：easy timelineEditor 的 timeline_data；epsilon（PromptRelaySmartEncode）；
+    # 随机化两个 Stage 种子；Using Editor Audio 保持 false（由模型生成语音）。
+    epsilon = float(params.get('epsilon', 0.25))
+    for nid, node in workflow.items():
+        ct = node.get('class_type')
+        if ct == 'easy timelineEditor':
+            node['inputs']['timeline_data'] = timeline_data
+        elif ct == 'PromptRelaySmartEncode':
+            node['inputs']['epsilon'] = epsilon
+            if 'global_prompt' in node['inputs']:
+                node['inputs']['global_prompt'] = params.get('global_prompt', '') or node['inputs'].get('global_prompt', '')
+        elif ct == 'PrimitiveInt' and (node.get('_meta', {}) or {}).get('title', '').lower().startswith('stage'):
+            node['inputs']['value'] = random.randint(1, 2**31)
+
+    try:
+        found, _ = comfy_run_and_wait(
+            workflow, want_kinds=('gifs', 'images', 'audio'), max_wait=3600,
+            on_prompt_id=(lambda pid: _sb_job_set(task_id, prompt_id=pid)) if task_id else None,
+            should_cancel=(lambda: _sb_job_cancelled(task_id)) if task_id else None,
+        )
+    except JobCancelled:
+        return {'success': False, 'cancelled': True, 'error': '已打断'}
+    except Exception as e:
+        return {'success': False, 'error': str(e)}
+    item = None
+    for key in ('gifs', 'images', 'audio'):
+        if found.get(key):
+            item = found[key][0]; break
+    if not item:
+        return {'success': False, 'error': 'Singularity 导演台未产出视频'}
+    content = comfy_fetch_view(item.get('filename', ''), item.get('subfolder', ''), item.get('type', 'output'))
+    if not content:
+        return {'success': False, 'error': '无法取回视频文件'}
+    return {'success': True, 'video_base64': base64.b64encode(content).decode('utf-8'),
+            'mime': 'video/mp4', 'frames': total_frames}
+
+
 def run_director_sync(params, task_id=None):
     """导演台视频生成：上传图像/音频 → 组装 timeline_data → 运行 LTXDirector → 返回视频 base64。
 
@@ -1737,13 +1884,16 @@ class Handler(BaseHTTPRequestHandler):
                 'guide_strength': d.get('guide_strength', '1.00'),
                 'use_custom_audio': d.get('use_custom_audio', None),
                 'fps': d.get('fps', 30),
+                # 选择导演台工作流：'singularity'(默认) | 'director'(旧 LTXDirector)
+                'workflow': (d.get('workflow') or 'singularity'),
             }
             has_new = bool(params.get('imageSegments')) or bool(params.get('audioSegments'))
             if not params['segments'] and not has_new:
                 self.send_json({'success': False, 'error': '缺少分镜段'}, 400); return
             def _director_worker(tid, p):
                 _sb_job_set(tid, status='running')
-                r = run_director_sync(p, task_id=tid)
+                runner = run_director_singularity_sync if (p.get('workflow') == 'singularity') else run_director_sync
+                r = runner(p, task_id=tid)
                 if r.get('success'):
                     _sb_job_set(tid, status='done', result=r)
                 elif r.get('cancelled'):

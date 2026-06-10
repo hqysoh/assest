@@ -2699,6 +2699,7 @@ const StoryboardModule = {
             globalPrompt: first.globalPrompt || first.prompt || '',
             guideStrength: '1.00',                // 引导强度默认值（1.0=最大约束，最贴近引导图）
             epsilon: 0.3,                         // 过渡柔和度（0.001 硬切 ~ 1.0 最柔）
+            workflow: 'singularity',              // 导演台工作流：'singularity'(默认，乱神版V3) | 'director'(旧 LTXDirector)
             useCustomAudio: audioClips.length > 0, // 使用音频：ON=用上传音频；OFF=让模型按提示词从零生成音频（含环境音）
             selectedUid: (imageClips[0] && imageClips[0].uid) || null,  // 预览/编辑当前选中的图像段
             playFrame: 0, playing: false,
@@ -2803,6 +2804,14 @@ const StoryboardModule = {
                             使用音频
                         </label>
                         <span class="sb-dir-eps-hint">${tl.useCustomAudio ? '用上传音频' : '模型生成音频'}</span>
+                    </span>
+                    <span class="sb-dir-sep"></span>
+                    <span class="sb-dir-guide" title="选择合成视频使用的导演台工作流：Singularity(乱神版V3，推荐) 或 旧导演台(LTXDirector)">
+                        合成工作流
+                        <select id="tlWorkflow" onchange="StoryboardModule.tlSetWorkflow(this.value)">
+                            <option value="singularity" ${(tl.workflow || 'singularity') === 'singularity' ? 'selected' : ''}>Singularity（乱神版V3）</option>
+                            <option value="director" ${tl.workflow === 'director' ? 'selected' : ''}>旧导演台（LTXDirector）</option>
+                        </select>
                     </span>
                 </div>
                 <div class="sb-dir-scroll">
@@ -3232,6 +3241,10 @@ const StoryboardModule = {
         // 同步更新旁边的提示文案
         const hint = document.querySelector('#tlUseAudio')?.closest('.sb-dir-guide')?.querySelector('.sb-dir-eps-hint');
         if (hint) hint.textContent = this._tl.useCustomAudio ? '用上传音频' : '模型生成音频';
+    },
+    tlSetWorkflow(v) {
+        // 导演台工作流选择：'singularity'(默认) | 'director'
+        this._tl.workflow = (v === 'director') ? 'director' : 'singularity';
     },
     tlSetEpsilon(v) {
         let n = parseFloat(v);
@@ -3728,6 +3741,7 @@ const StoryboardModule = {
                 max_guide_strength: parseFloat(tl.guideStrength || '1.00'),   // 每段引导强度上限
                 use_custom_audio: (tl.useCustomAudio !== false) && audioSegments.length > 0,
                 fps: tl.fps,
+                workflow: tl.workflow || 'singularity',   // 导演台工作流：singularity(默认) | director
             });
             if (!submit.success || !submit.task_id) throw new Error(submit.error || '提交失败');
             // 持久化任务：关弹窗 / 刷新后仍可恢复计时与轮询
