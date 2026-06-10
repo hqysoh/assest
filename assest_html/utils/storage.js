@@ -221,21 +221,21 @@ const Storage = {
 - local_prompts：返回长度为 4 的数组，每项对应一个 Shot（面板），适配 **Singularity-LTX-2.3 OmniCine** 模型，是**一整段连贯、自然语言的英文画面描述**（信息量要足、动作连贯）。
 
   【Singularity / OmniCine 提示词铁律 — 必看】
-  ① **语言规则**：除「说话内容（对白）」保留中文外，**其余一律使用英文**。不要出现 `**Character Prompt (for AI Image Generation):**` 之类的任何标题/小标题，直接输出翻译后的自然语言描述。
+  ① **语言规则**：除「说话内容（对白）」保留中文外，**其余一律使用英文**。不要出现「**Character Prompt (for AI Image Generation):**」之类的任何标题/小标题，直接输出翻译后的自然语言描述。
   ② **自然语言、动作连贯**：用连贯的句子描述，不要罗列要素标签。
-  ③ **时间分段叙事**：在同一段里按时间推进描述「动作演变 + 运镜 + 光照 + 声音」，用英文时间标记，如 `0-5 seconds, ...`、`5-10 seconds, ...`、`10-15 seconds, ...`（秒数根据该 Shot 时长合理划分；短镜头可只用一个区间）。
+  ③ **时间分段叙事**：在同一段里按时间推进描述「动作演变 + 运镜 + 光照 + 声音」，用英文时间标记，如 0-5 seconds, ... / 5-10 seconds, ... / 10-15 seconds, ...（秒数根据该 Shot 时长合理划分；短镜头可只用一个区间）。
   ④ **建议结构顺序**（全英文，自然衔接）：
-     - 开头：场景与风格（如 `Cinematic and realistic style, dynamic and fierce mood.`）
+     - 开头：场景与风格（如 Cinematic and realistic style, dynamic and fierce mood.）
      - 动作描述（分时间段，描述人物动作如何随时间演变）
-     - 运镜与构图（分时间段，如 `slow dolly in`、`full shot with dynamic tracking movement`、`tight close-up, static camera`）
-     - 光照与色调（如 `Realistic indoor gym lighting, strong key light, high contrast shadows, desaturated cool tones.`）
+- 运镜与构图（分时间段，如 slow dolly in / full shot with dynamic tracking movement / tight close-up, static camera）
+- 光照与色调（如 Realistic indoor gym lighting, strong key light, high contrast shadows, desaturated cool tones.）
      - 对白（见下条）
-     - 声音设计（如 `Ambient gym sounds, sudden dramatic BGM crescendo, precise lip-sync.`）
-     - 质感词（如 `film grain, cinematic bokeh`）
-     - 末尾 `无字幕`
-  ⑤ **对白处理（关键，唯一中文）**：用英文句式引出说话人 + 冒号 + 中文对白原文，格式：`The woman with blue hair said：等下有你好看的，渣滓！`。冒号后是**中文对白原文**（严禁翻译成英文、严禁加引号、严禁换行、严禁出现 [laughing]/[Surprise-wa] 等配音标签）。可在对白后补充英文声线/语速，如 `Voice: clear and sharp, Pace: fast.`。说话动词用英文：said / whispered / shouted / asked / murmured / narrated（画外音 voice-over）。
-  ⑥ **无台词的 Shot**：用英文写明 `no character dialogue`（或 `无人物对白`），只描述画面与环境音。
-  ⑦ **多人同框**：用英文写明谁在说话、谁不说话（如 `the man stays silent and does not move his lips`），避免对口型驱动错人。
+- 声音设计（如 Ambient gym sounds, sudden dramatic BGM crescendo, precise lip-sync.）
+- 质感词（如 film grain, cinematic bokeh）
+- 末尾 无字幕
+  ⑤ **对白处理（关键，唯一中文）**：用英文句式引出说话人 + 冒号 + 中文对白原文，格式：The woman with blue hair said：等下有你好看的，渣滓！。冒号后是**中文对白原文**（严禁翻译成英文、严禁加引号、严禁换行、严禁出现 [laughing]/[Surprise-wa] 等配音标签）。可在对白后补充英文声线/语速，如 Voice: clear and sharp, Pace: fast.。说话动词用英文：said / whispered / shouted / asked / murmured / narrated（画外音 voice-over）。
+⑥ **无台词的 Shot**：用英文写明 no character dialogue（或 无人物对白），只描述画面与环境音。
+⑦ **多人同框**：用英文写明谁在说话、谁不说话（如 the man stays silent and does not move his lips），避免对口型驱动错人。
 
   【风格 / 运镜 参考词（可按需选用，均为英文优先）】
   - 风格：Cinematic Style / Anime Style / Realistic Style / Realistic Cyberpunk Aesthetic / 3D Game Cinematic Render / Vintage Film Grain Style / Mysterious and Suspenseful Mood / Melancholic Golden Hour / Cozy and Warm Slice-of-Life / Dark and Gritty Urban Noir
@@ -244,7 +244,7 @@ const Storage = {
   【收尾】每个 local_prompt **末尾必须加「无字幕」三个字**（画面不渲染任何字幕/字母/文字水印）。
 
   【完整示例（仅示范风格，实际按剧本生成）】
-  `Cinematic and realistic style, dynamic and fierce mood. 0-5 seconds, woman is gently adjusting and styling her hair, showing a calm preparation. 5-10 seconds, switches to a full shot, she becomes passionate and energetic, performing a series of intense boxing combinations with sharp punches. 10-15 seconds, switches to a tight facial close-up shot, she stares directly into the camera with an aggressive glare. 0-5 seconds, slow dolly in, emphasis composition. 5-10 seconds, full shot with dynamic tracking movement. 10-15 seconds, tight close-up, static camera. Realistic indoor gym lighting, strong key light, high contrast shadows, desaturated cool tones. 10-15 seconds，The woman with blue hair said：等下有你好看的，渣滓！Voice: clear and sharp, Pace: fast. Ambient gym sounds, wind resistance from fast punches, sudden dramatic BGM crescendo, precise lip-sync. film grain, cinematic bokeh，无字幕`
+  示例 → Cinematic and realistic style, dynamic and fierce mood. 0-5 seconds, woman is gently adjusting and styling her hair, showing a calm preparation. 5-10 seconds, switches to a full shot, she becomes passionate and energetic, performing a series of intense boxing combinations with sharp punches. 10-15 seconds, switches to a tight facial close-up shot, she stares directly into the camera with an aggressive glare. 0-5 seconds, slow dolly in, emphasis composition. 5-10 seconds, full shot with dynamic tracking movement. 10-15 seconds, tight close-up, static camera. Realistic indoor gym lighting, strong key light, high contrast shadows, desaturated cool tones. 10-15 seconds，The woman with blue hair said：等下有你好看的，渣滓！Voice: clear and sharp, Pace: fast. Ambient gym sounds, wind resistance from fast punches, sudden dramatic BGM crescendo, precise lip-sync. film grain, cinematic bokeh，无字幕
 
 - shot_transitions：返回长度为 4 的数组，每项是「该 Shot 到下一个 Shot 的转场 / 镜头语言连贯性描述」（中文单行，用专业运镜词，如：镜头由中景缓慢推近至特写、人物转身向右带出下一场景、光线渐暗淡入下一镜、快速横摇切到对话另一方…）。**每项末尾也必须加「无字幕」**。第 4 项（最后一个面板）可留空字符串。
 
@@ -274,7 +274,7 @@ const Storage = {
   }
 }
 
-规则：所有字符串单行无换行；local_prompts 适配 Singularity/OmniCine：**除中文对白外一律英文自然语言**、不要任何标题（如 **Character Prompt...**）、动作连贯、按时间分段（如 0-5 seconds / 5-10 seconds，依镜头时长划分）、依次自然衔接「场景风格→动作→运镜构图→光照色调→对白→声音设计→质感」；对白格式为 `英文说话人 said：中文对白原文`（冒号后中文原文，严禁翻译成英文、严禁加引号、严禁换行、严禁出现 [Surprise-wa] 等配音标签），无对白写 `no character dialogue`；local_prompts 固定 4 项、每项末尾带「无字幕」；nano_banana_prompt 的 4 个面板必须与 local_prompts 第1/2/3/4项逐一对应（同序、同画面内容），并在正文中明确声明「画面干净、无字幕、无任何文字/字母/水印/logo」；shot_transitions 固定 4 项（最后一项可空，其余末尾带「无字幕」）；dialogues 固定 4 项（无台词的面板字段留空，text 可按情绪偶尔点缀配音情绪标签如 [Surprise-wa]/[Confirmation-en]）；配音情绪标签**只允许出现在 dialogues[].text**，严禁出现在 local_prompts/global_prompt/nano_banana_prompt/shot_transitions 等画面提示词中；幻想生物形态描述完整。`,
+规则：所有字符串单行无换行；local_prompts 适配 Singularity/OmniCine：**除中文对白外一律英文自然语言**、不要任何标题（如 **Character Prompt...**）、动作连贯、按时间分段（如 0-5 seconds / 5-10 seconds，依镜头时长划分）、依次自然衔接「场景风格→动作→运镜构图→光照色调→对白→声音设计→质感」；对白格式为「英文说话人 said：中文对白原文」（冒号后中文原文，严禁翻译成英文、严禁加引号、严禁换行、严禁出现 [Surprise-wa] 等配音标签），无对白写 no character dialogue；local_prompts 固定 4 项、每项末尾带「无字幕」；nano_banana_prompt 的 4 个面板必须与 local_prompts 第1/2/3/4项逐一对应（同序、同画面内容），并在正文中明确声明「画面干净、无字幕、无任何文字/字母/水印/logo」；shot_transitions 固定 4 项（最后一项可空，其余末尾带「无字幕」）；dialogues 固定 4 项（无台词的面板字段留空，text 可按情绪偶尔点缀配音情绪标签如 [Surprise-wa]/[Confirmation-en]）；配音情绪标签**只允许出现在 dialogues[].text**，严禁出现在 local_prompts/global_prompt/nano_banana_prompt/shot_transitions 等画面提示词中；幻想生物形态描述完整。`,
             voiceSettings: { textTemplate: "我是{name}，这是我的音色，很高兴认识你" },
             imageApiGroups: [
                 {
