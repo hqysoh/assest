@@ -850,20 +850,37 @@ body.sb-dir-ph-cursor{cursor:ew-resize !important}
 .sb-dir-guide{font-size:0.72rem;color:var(--t2);font-weight:600;display:inline-flex;align-items:center;gap:0.3rem;white-space:nowrap}
 .sb-dir-guide input[type=number]{width:62px}
 .sb-dir-eps-hint{font-size:0.6rem;color:var(--t3,#888);font-weight:500;white-space:nowrap}
-/* 工具栏自定义下拉（帧率 / 合成工作流）：自绘箭头 + 统一圆角描边 + hover/focus 高亮 */
+/* ===== 工具栏自定义下拉（帧率 / 合成工作流）：完全自绘弹层，风格统一可控 ===== */
 .sb-dir-selwrap{gap:0.35rem}
-.sb-dir-select{position:relative;display:inline-flex;align-items:center}
-.sb-dir-select::after{content:'';position:absolute;right:9px;top:50%;width:7px;height:7px;
-border-right:1.6px solid var(--t2);border-bottom:1.6px solid var(--t2);
-transform:translateY(-65%) rotate(45deg);pointer-events:none;transition:border-color .18s}
-.sb-dir-select select{appearance:none;-webkit-appearance:none;-moz-appearance:none;
-background:var(--bg2);border:1px solid var(--bd);border-radius:8px;color:var(--t);
-font-size:0.74rem;font-weight:600;padding:0.26rem 1.7rem 0.26rem 0.6rem;cursor:pointer;
-line-height:1.2;transition:border-color .18s,box-shadow .18s,background .18s;min-width:96px}
-.sb-dir-select select:hover{border-color:var(--ac);background:var(--bg3)}
-.sb-dir-select select:focus{outline:none;border-color:var(--ac);box-shadow:0 0 0 2px var(--glow)}
-.sb-dir-select:hover::after,.sb-dir-select:focus-within::after{border-color:var(--ac)}
-.sb-dir-select option{background:var(--bg2);color:var(--t)}
+.sb-dd{position:relative;display:inline-flex}
+.sb-dd-btn{display:inline-flex;align-items:center;gap:0.5rem;min-width:104px;
+background:var(--bg2);border:1px solid var(--bd);border-radius:9px;color:var(--t);
+font-size:0.74rem;font-weight:700;padding:0.32rem 0.7rem;cursor:pointer;line-height:1.2;
+transition:border-color .16s,box-shadow .16s,background .16s}
+.sb-dd-btn:hover{border-color:var(--ac);background:var(--bg3)}
+.sb-dd.open .sb-dd-btn{border-color:var(--ac);box-shadow:0 0 0 2px var(--glow);background:var(--bg3)}
+.sb-dd-btn-label{flex:1;text-align:left;white-space:nowrap}
+.sb-dd-caret{width:7px;height:7px;border-right:1.7px solid var(--t2);border-bottom:1.7px solid var(--t2);
+transform:translateY(-2px) rotate(45deg);transition:transform .2s,border-color .16s}
+.sb-dd-btn:hover .sb-dd-caret,.sb-dd.open .sb-dd-caret{border-color:var(--ac)}
+.sb-dd.open .sb-dd-caret{transform:translateY(1px) rotate(-135deg)}
+/* 弹层菜单：默认隐藏，open 时浮出 */
+.sb-dd-menu{position:absolute;top:calc(100% + 6px);left:0;z-index:60;min-width:130px;
+background:var(--bg2);border:1px solid var(--bd);border-radius:11px;padding:5px;
+box-shadow:0 12px 34px rgba(0,0,0,.45),0 2px 8px rgba(0,0,0,.3);
+opacity:0;visibility:hidden;transform:translateY(-6px) scale(.97);transform-origin:top left;
+transition:opacity .16s,transform .16s,visibility .16s}
+.sb-dd.open .sb-dd-menu{opacity:1;visibility:visible;transform:translateY(0) scale(1)}
+.sb-dd-item{display:flex;align-items:center;gap:0.5rem;padding:0.42rem 0.55rem;border-radius:8px;
+cursor:pointer;transition:background .14s;user-select:none}
+.sb-dd-item:hover{background:var(--bg3)}
+.sb-dd-item.is-on{background:var(--grad-soft,rgba(120,120,255,.12))}
+.sb-dd-item-main{display:flex;flex-direction:column;gap:1px;flex:1;min-width:0}
+.sb-dd-item-label{font-size:0.78rem;font-weight:700;color:var(--t);white-space:nowrap}
+.sb-dd-item-desc{font-size:0.62rem;color:var(--t3,#888);font-weight:500;white-space:nowrap}
+.sb-dd-check{font-size:0.78rem;font-weight:900;color:var(--ac);opacity:0;transition:opacity .14s}
+.sb-dd-item.is-on .sb-dd-check{opacity:1}
+.sb-dd-item.is-on .sb-dd-item-label{color:var(--ac)}
 /* 使用音频开关 */
 .sb-dir-switch{display:inline-flex;align-items:center;gap:0.3rem;cursor:pointer;font-size:0.72rem;color:var(--t2);font-weight:600;white-space:nowrap}
 .sb-dir-switch input[type=checkbox]{width:auto;margin:0;cursor:pointer;accent-color:var(--ac)}

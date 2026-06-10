@@ -2777,14 +2777,12 @@ const StoryboardModule = {
                     <button class="btn-ghost btn-tiny" onclick="StoryboardModule.tlAddImage()">🖼️ 添加图像</button>
                     <button class="btn-ghost btn-tiny" onclick="StoryboardModule.tlAddAudio()">🎵 添加音频</button>
                     <span class="sb-dir-sep"></span>
-                    <label class="sb-dir-total sb-dir-selwrap">帧率
-                        <span class="sb-dir-select">
-                            <select id="tlFps" onchange="StoryboardModule.tlSetFps(this.value)">
-                                <option value="24" ${tl.fps === 24 ? 'selected' : ''}>24 fps</option>
-                                <option value="30" ${tl.fps === 30 ? 'selected' : ''}>30 fps</option>
-                            </select>
-                        </span>
-                    </label>
+                    <span class="sb-dir-total sb-dir-selwrap">帧率
+                        ${this._ddHtml('fps', String(tl.fps), [
+                            { v: '24', label: '24 fps', desc: '更快 / 省显存' },
+                            { v: '30', label: '30 fps', desc: '更流畅' },
+                        ])}
+                    </span>
                     <span class="sb-dir-sep"></span>
                     <label class="sb-dir-total">视频总长
                         <input type="number" id="tlTotalSec" min="1" step="0.5" value="${(tl.totalFrames / tl.fps).toFixed(1)}"
@@ -2814,12 +2812,10 @@ const StoryboardModule = {
                     </span>
                     <span class="sb-dir-sep"></span>
                     <span class="sb-dir-guide sb-dir-selwrap">合成工作流
-                        <span class="sb-dir-select">
-                            <select id="tlWorkflow" onchange="StoryboardModule.tlSetWorkflow(this.value)">
-                                <option value="singularity" ${(tl.workflow || 'singularity') === 'singularity' ? 'selected' : ''}>Singularity 乱神版V3</option>
-                                <option value="director" ${tl.workflow === 'director' ? 'selected' : ''}>旧导演台 LTXDirector</option>
-                            </select>
-                        </span>
+                        ${this._ddHtml('workflow', (tl.workflow || 'singularity'), [
+                            { v: 'singularity', label: 'Singularity', desc: '乱神版 V3 · 推荐' },
+                            { v: 'director', label: '旧导演台', desc: 'LTXDirector' },
+                        ], 168)}
                     </span>
                 </div>
                 <div class="sb-dir-scroll">
@@ -3250,10 +3246,66 @@ const StoryboardModule = {
         const hint = document.querySelector('#tlUseAudio')?.closest('.sb-dir-guide')?.querySelector('.sb-dir-eps-hint');
         if (hint) hint.textContent = this._tl.useCustomAudio ? '用上传音频' : '模型生成音频';
     },
-    tlSetWorkflow(v) {
-        // 导演台工作流选择：'singularity'(默认) | 'director'
-        this._tl.workflow = (v === 'director') ? 'director' : 'singularity';
-    },
+// ---------- 自定义下拉组件（替代原生 select，弹层完全可控、风格统一） ----------
+// group: 唯一标识('fps'|'workflow')；cur: 当前值；opts: [{v,label,desc}]；menuW: 弹层宽度(px)
+_ddHtml(group, cur, opts, menuW) {
+    const sel = opts.find(o => o.v === cur) || opts[0];
+    const items = opts.map(o => `
+        <div class="sb-dd-item ${o.v === cur ? 'is-on' : ''}" data-v="${o.v}"
+            onclick="StoryboardModule._ddPick('${group}','${o.v}')">
+            <span class="sb-dd-item-main">
+                <span class="sb-dd-item-label">${this.esc(o.label)}</span>
+                ${o.desc ? `<span class="sb-dd-item-desc">${this.esc(o.desc)}</span>` : ''}
+            </span>
+            <span class="sb-dd-check">✓</span>
+        </div>`).join('');
+    return `
+        <span class="sb-dd" id="sbDd-${group}" data-group="${group}">
+            <button type="button" class="sb-dd-btn" onclick="StoryboardModule._ddToggle('${group}',event)">
+                <span class="sb-dd-btn-label">${this.esc(sel.label)}</span>
+                <span class="sb-dd-caret"></span>
+            </button>
+            <div class="sb-dd-menu" style="${menuW ? `min-width:${menuW}px` : ''}">${items}</div>
+        </span>`;
+},
+_ddToggle(group, ev) {
+    if (ev) ev.stopPropagation();
+    const el = document.getElementById('sbDd-' + group);
+    if (!el) return;
+    const willOpen = !el.classList.contains('open');
+    // 先关闭其他打开的下拉
+    document.querySelectorAll('.sb-dd.open').forEach(d => d.classList.remove('open'));
+    if (willOpen) {
+        el.classList.add('open');
+        // 点击空白处关闭（一次性）
+        const close = (e) => {
+            if (!el.contains(e.target)) { el.classList.remove('open'); document.removeEventListener('mousedown', close); }
+        };
+        setTimeout(() => document.addEventListener('mousedown', close), 0);
+    }
+},
+_ddPick(group, v) {
+    const el = document.getElementById('sbDd-' + group);
+    if (el) {
+        el.classList.remove('open');
+        // 更新按钮显示文案 + 选中态
+        const items = el.querySelectorAll('.sb-dd-item');
+        let label = '';
+        items.forEach(it => {
+            const on = it.getAttribute('data-v') === v;
+            it.classList.toggle('is-on', on);
+            if (on) label = it.querySelector('.sb-dd-item-label').textContent;
+        });
+        const btn = el.querySelector('.sb-dd-btn-label');
+        if (btn && label) btn.textContent = label;
+    }
+    if (group === 'fps') this.tlSetFps(v);
+    else if (group === 'workflow') this.tlSetWorkflow(v);
+},
+tlSetWorkflow(v) {
+// 导演台工作流选择：'singularity'(默认) | 'director'
+this._tl.workflow = (v === 'director') ? 'director' : 'singularity';
+},
     tlSetFps(v) {
         // 切换帧率：按比例重算所有段的帧数，保持镜头「秒数」不变。
         // 降到 24fps → 同样秒数的镜头帧数变少 → 总帧数变少 → 二阶段(上采样精修)显存与耗时显著下降。
