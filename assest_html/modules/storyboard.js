@@ -2777,11 +2777,13 @@ const StoryboardModule = {
                     <button class="btn-ghost btn-tiny" onclick="StoryboardModule.tlAddImage()">🖼️ 添加图像</button>
                     <button class="btn-ghost btn-tiny" onclick="StoryboardModule.tlAddAudio()">🎵 添加音频</button>
                     <span class="sb-dir-sep"></span>
-                    <label class="sb-dir-total" title="帧率：降到 24fps 可减少总帧数→显著降低二阶段(上采样精修)的显存与耗时；镜头秒数保持不变">帧率
-                        <select id="tlFps" onchange="StoryboardModule.tlSetFps(this.value)">
-                            <option value="24" ${tl.fps === 24 ? 'selected' : ''}>24 fps（更快/省显存）</option>
-                            <option value="30" ${tl.fps === 30 ? 'selected' : ''}>30 fps（更流畅）</option>
-                        </select>
+                    <label class="sb-dir-total sb-dir-selwrap">帧率
+                        <span class="sb-dir-select">
+                            <select id="tlFps" onchange="StoryboardModule.tlSetFps(this.value)">
+                                <option value="24" ${tl.fps === 24 ? 'selected' : ''}>24 fps</option>
+                                <option value="30" ${tl.fps === 30 ? 'selected' : ''}>30 fps</option>
+                            </select>
+                        </span>
                     </label>
                     <span class="sb-dir-sep"></span>
                     <label class="sb-dir-total">视频总长
@@ -2793,16 +2795,14 @@ const StoryboardModule = {
                         <button class="sb-tl-mini" onclick="StoryboardModule.tlZoom(1)">＋</button>
                     </span>
                     <span class="sb-dir-sep"></span>
-                    <span class="sb-dir-guide" title="引导强度上限：每段引导图对画面的约束。越低动作越自由，越高越贴近原图但易僵硬。建议 0.5~0.8">引导强度
+                    <span class="sb-dir-guide">引导强度
                         <input type="number" id="tlGuide" min="0" max="1" step="0.05" value="${tl.guideStrength || '1.00'}"
                             oninput="StoryboardModule.tlSetGuide(this.value)">
-                        <span class="sb-dir-eps-hint">0~1｜越低越敢动</span>
                     </span>
-                    <span class="sb-dir-guide" title="过渡柔和度：越小越硬切、越大越柔和。范围 0.001 ~ 1.0（0.001=硬切, 0.3~0.5=平滑, 0.8≈淡入淡出）">
+                    <span class="sb-dir-guide">
                         Epsilon
                         <input type="number" id="tlEpsilon" min="0.001" max="1" step="0.001" value="${(tl.epsilon ?? 0.3)}"
                             oninput="StoryboardModule.tlSetEpsilon(this.value)">
-                        <span class="sb-dir-eps-hint">0.001~1.0｜越大越柔</span>
                     </span>
                     <span class="sb-dir-guide" title="使用音频：开启=使用你上传/添加的音频；关闭=不使用上传音频，由模型根据提示词从零生成整段音频（可含环境音/氛围，但人声质量较低）">
                         <label class="sb-dir-switch">
@@ -2813,12 +2813,13 @@ const StoryboardModule = {
                         <span class="sb-dir-eps-hint">${tl.useCustomAudio ? '用上传音频' : '模型生成音频'}</span>
                     </span>
                     <span class="sb-dir-sep"></span>
-                    <span class="sb-dir-guide" title="选择合成视频使用的导演台工作流：Singularity(乱神版V3，推荐) 或 旧导演台(LTXDirector)">
-                        合成工作流
-                        <select id="tlWorkflow" onchange="StoryboardModule.tlSetWorkflow(this.value)">
-                            <option value="singularity" ${(tl.workflow || 'singularity') === 'singularity' ? 'selected' : ''}>Singularity（乱神版V3）</option>
-                            <option value="director" ${tl.workflow === 'director' ? 'selected' : ''}>旧导演台（LTXDirector）</option>
-                        </select>
+                    <span class="sb-dir-guide sb-dir-selwrap">合成工作流
+                        <span class="sb-dir-select">
+                            <select id="tlWorkflow" onchange="StoryboardModule.tlSetWorkflow(this.value)">
+                                <option value="singularity" ${(tl.workflow || 'singularity') === 'singularity' ? 'selected' : ''}>Singularity 乱神版V3</option>
+                                <option value="director" ${tl.workflow === 'director' ? 'selected' : ''}>旧导演台 LTXDirector</option>
+                            </select>
+                        </span>
                     </span>
                 </div>
                 <div class="sb-dir-scroll">

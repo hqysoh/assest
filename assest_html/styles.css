@@ -850,6 +850,20 @@ body.sb-dir-ph-cursor{cursor:ew-resize !important}
 .sb-dir-guide{font-size:0.72rem;color:var(--t2);font-weight:600;display:inline-flex;align-items:center;gap:0.3rem;white-space:nowrap}
 .sb-dir-guide input[type=number]{width:62px}
 .sb-dir-eps-hint{font-size:0.6rem;color:var(--t3,#888);font-weight:500;white-space:nowrap}
+/* 工具栏自定义下拉（帧率 / 合成工作流）：自绘箭头 + 统一圆角描边 + hover/focus 高亮 */
+.sb-dir-selwrap{gap:0.35rem}
+.sb-dir-select{position:relative;display:inline-flex;align-items:center}
+.sb-dir-select::after{content:'';position:absolute;right:9px;top:50%;width:7px;height:7px;
+border-right:1.6px solid var(--t2);border-bottom:1.6px solid var(--t2);
+transform:translateY(-65%) rotate(45deg);pointer-events:none;transition:border-color .18s}
+.sb-dir-select select{appearance:none;-webkit-appearance:none;-moz-appearance:none;
+background:var(--bg2);border:1px solid var(--bd);border-radius:8px;color:var(--t);
+font-size:0.74rem;font-weight:600;padding:0.26rem 1.7rem 0.26rem 0.6rem;cursor:pointer;
+line-height:1.2;transition:border-color .18s,box-shadow .18s,background .18s;min-width:96px}
+.sb-dir-select select:hover{border-color:var(--ac);background:var(--bg3)}
+.sb-dir-select select:focus{outline:none;border-color:var(--ac);box-shadow:0 0 0 2px var(--glow)}
+.sb-dir-select:hover::after,.sb-dir-select:focus-within::after{border-color:var(--ac)}
+.sb-dir-select option{background:var(--bg2);color:var(--t)}
 /* 使用音频开关 */
 .sb-dir-switch{display:inline-flex;align-items:center;gap:0.3rem;cursor:pointer;font-size:0.72rem;color:var(--t2);font-weight:600;white-space:nowrap}
 .sb-dir-switch input[type=checkbox]{width:auto;margin:0;cursor:pointer;accent-color:var(--ac)}
