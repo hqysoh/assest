@@ -25,7 +25,7 @@ const StoryboardModule = {
     // 转场 → Epsilon 映射（依据 WhatDreamsCost LTXDirector 节点源码：
     // <0.1 都是硬边界，paper 默认 0.001；越大过渡越柔和）
     TRANSITION_EPSILON: { cut: 0.001, smooth: 0.5, fade: 0.8 },
-    FPS: 30,
+    FPS: 24,   // 默认 24fps：同秒数下总帧数更少，二阶段(上采样精修)显存与耗时更低；可在时间轴弹窗切到 30fps
 
     // ---------- 入口渲染 ----------
     render(projectId) {
@@ -2777,6 +2777,13 @@ const StoryboardModule = {
                     <button class="btn-ghost btn-tiny" onclick="StoryboardModule.tlAddImage()">🖼️ 添加图像</button>
                     <button class="btn-ghost btn-tiny" onclick="StoryboardModule.tlAddAudio()">🎵 添加音频</button>
                     <span class="sb-dir-sep"></span>
+                    <label class="sb-dir-total" title="帧率：降到 24fps 可减少总帧数→显著降低二阶段(上采样精修)的显存与耗时；镜头秒数保持不变">帧率
+                        <select id="tlFps" onchange="StoryboardModule.tlSetFps(this.value)">
+                            <option value="24" ${tl.fps === 24 ? 'selected' : ''}>24 fps（更快/省显存）</option>
+                            <option value="30" ${tl.fps === 30 ? 'selected' : ''}>30 fps（更流畅）</option>
+                        </select>
+                    </label>
+                    <span class="sb-dir-sep"></span>
                     <label class="sb-dir-total">视频总长
                         <input type="number" id="tlTotalSec" min="1" step="0.5" value="${(tl.totalFrames / tl.fps).toFixed(1)}"
                             oninput="StoryboardModule.tlSetTotalSec(this.value)"> 秒
@@ -3245,6 +3252,36 @@ const StoryboardModule = {
     tlSetWorkflow(v) {
         // 导演台工作流选择：'singularity'(默认) | 'director'
         this._tl.workflow = (v === 'director') ? 'director' : 'singularity';
+    },
+    tlSetFps(v) {
+        // 切换帧率：按比例重算所有段的帧数，保持镜头「秒数」不变。
+        // 降到 24fps → 同样秒数的镜头帧数变少 → 总帧数变少 → 二阶段(上采样精修)显存与耗时显著下降。
+        const tl = this._tl; if (!tl) return;
+        const next = (parseInt(v) === 24) ? 24 : 30;
+        const old = tl.fps || 30;
+        if (next === old) return;
+        const r = next / old;   // 缩放因子（如 24/30 = 0.8）
+        const conv = n => Math.max(1, Math.round((Number(n) || 0) * r));
+        (tl.imageClips || []).forEach(c => {
+            c.start = Math.round((c.start || 0) * r);
+            c.length = conv(c.length);
+            // transitionDur 是「秒」，与帧率无关，保持不变
+        });
+        (tl.audioClips || []).forEach(a => {
+            a.start = Math.round((a.start || 0) * r);
+            a.length = conv(a.length);
+            a.trimStart = Math.round((a.trimStart || 0) * r);
+            // 音频真实时长按新帧率换算（帧数 = 秒 × fps）
+            if (a.audioDurationFrames) a.audioDurationFrames = conv(a.audioDurationFrames);
+        });
+        tl.totalFrames = Math.max(1, Math.round((tl.totalFrames || 0) * r));
+        if (tl.playFrame) tl.playFrame = Math.round(tl.playFrame * r);
+        tl.fps = next;
+        this._renderTracks();
+        this._updatePreview && this._updatePreview();
+        // 同步刷新「视频总长」输入框显示
+        const totalEl = document.getElementById('tlTotalSec');
+        if (totalEl) totalEl.value = (tl.totalFrames / tl.fps).toFixed(1);
     },
     tlSetEpsilon(v) {
         let n = parseFloat(v);
