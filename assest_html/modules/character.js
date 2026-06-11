@@ -281,6 +281,7 @@ const CharacterModule = {
                                 <button class="btn-ghost btn-tiny ${ttsTask ? 'btn-disabled' : ''}" id="ttsGenListBtn_${c.id}" onclick="${ttsTask ? '' : `CharacterModule.showTtsModal('${c.id}')`}">${ttsTask ? `<span id="ttsTime_${c.id}">⏳ ${ttsElapsedSec}s</span>` : '🔊 生成'}</button>
                                 ${au ? `<button class="btn-play btn-tiny" id="ab_${c.id}" onclick="CharacterModule.toggleAudio('${c.id}')">▶ 播放</button>` : ''}
                                 ${au ? `<span class="audio-history-link" onclick="CharacterModule.showAudioHistory('${c.id}')">历史</span>` : ''}
+                                ${au ? App.audioDragHandle(Storage.mediaUrl(au.data), `${this.esc(c.name || '音色')}.${(au.mime||'').includes('mpeg')?'mp3':(au.mime||'').includes('flac')?'flac':'wav'}`) : ''}
                                 <audio id="ae_${c.id}" style="display:none" onended="document.getElementById('ab_${c.id}').textContent='▶ 播放'; CharacterModule._currentAudio=null;"><source src="${au ? Storage.mediaUrl(au.data) : ''}" type="${au ? (au.mime || 'audio/wav') : ''}"></audio>
                             </div>
                         </div>
@@ -399,6 +400,7 @@ const CharacterModule = {
                 <audio id="ha_${a.id}" src="${Storage.mediaUrl(a.data)}" style="display:none" onended="document.getElementById('hp_${a.id}').textContent='▶'; CharacterModule._currentAudio=null;"></audio>
                 <div class="audio-history-actions">
                     <button class="btn-play audio-play-btn" id="hp_${a.id}" onclick="CharacterModule.tHA('${a.id}')">▶</button>
+                    ${App.audioDragHandle(Storage.mediaUrl(a.data), `${this.esc(c.name || '音色')}_${idx + 1}.${(a.mime||'').includes('mpeg')?'mp3':(a.mime||'').includes('flac')?'flac':'wav'}`, '拖出')}
                     <button class="gallery-select-btn" title="设为当前" onclick="CharacterModule.selA('${cid}','${a.id}')">✓</button>
                     <button class="gallery-delete-btn" title="删除" onclick="CharacterModule.delA('${cid}','${a.id}')">×</button>
                 </div>

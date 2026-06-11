@@ -147,6 +147,35 @@ const App = {
         }, duration);
     },
 
+    // ===== 音频拖放：把网页内的音频直接拖到外部剪辑软件 / 桌面 =====
+    // 浏览器原生能力：在 dragstart 时设置 DownloadURL（mime:filename:url），
+    // Chromium 系（Chrome/Edge/IDE WebView）支持将其拖出到操作系统应用。
+    // url 需为可直接 GET 的真实地址（Storage.mediaUrl 返回 http URL，符合要求）。
+    audioDragHandle(url, filename, label) {
+        if (!url) return '';
+        const f = (filename || 'audio.wav').replace(/[\\/:*?"<>|]/g, '_');
+        const u = String(url);
+        const text = label || '拖到剪辑软件';
+        return `<span class="audio-drag-handle" draggable="true" title="按住拖拽，可直接拖到剪辑软件或桌面导出该音频"
+            ondragstart="App.onAudioDragStart(event, '${u.replace(/'/g, "\\'")}', '${f.replace(/'/g, "\\'")}')">⤓ ${this.esc ? this.esc(text) : text}</span>`;
+    },
+    onAudioDragStart(ev, url, filename, mime) {
+        try {
+            const dt = ev.dataTransfer;
+            if (!dt) return;
+            const m = mime || (/\.mp3$/i.test(filename) ? 'audio/mpeg' : /\.flac$/i.test(filename) ? 'audio/flac' : /\.ogg$/i.test(filename) ? 'audio/ogg' : 'audio/wav');
+            // 绝对 URL（DownloadURL 要求完整地址）
+            let abs = url;
+            try { abs = new URL(url, location.href).href; } catch (e) {}
+            dt.effectAllowed = 'copy';
+            // 关键：DownloadURL → 拖出到外部应用时按此下载为文件
+            dt.setData('DownloadURL', `${m}:${filename}:${abs}`);
+            // 兼容：拖到支持 URL/文本的目标
+            dt.setData('text/uri-list', abs);
+            dt.setData('text/plain', abs);
+        } catch (e) { /* 忽略：不影响页面其它交互 */ }
+    },
+
     // 应用内确认弹窗（替代原生 confirm —— IDE 内嵌 WebView 会禁用原生 alert/confirm）。
     // 返回 Promise<boolean>：点确定 resolve(true)，取消/关闭 resolve(false)。
     confirm(opts) {

@@ -175,6 +175,12 @@ body::before{content:'';position:fixed;inset:0;background:
 /* ============ Audio ============ */
 .audio-history-link{font-size:0.7rem;color:var(--ac2);cursor:pointer;font-weight:600;transition:all .15s}
 .audio-history-link:hover{text-decoration:underline;opacity:.8}
+/* 可拖拽音频手柄：按住拖到外部剪辑软件 / 桌面导出该音频 */
+.audio-drag-handle{display:inline-flex;align-items:center;gap:2px;font-size:0.68rem;font-weight:700;
+color:var(--ac);background:var(--bg2);border:1px dashed var(--ac);border-radius:7px;
+padding:0.12rem 0.42rem;cursor:grab;user-select:none;white-space:nowrap;transition:all .15s}
+.audio-drag-handle:hover{background:var(--bg3);box-shadow:0 0 0 2px var(--glow)}
+.audio-drag-handle:active{cursor:grabbing;opacity:.7}
 .audio-history-list{display:flex;flex-direction:column;gap:0.55rem}
 .audio-history-item{display:flex;align-items:center;gap:0.85rem;padding:0.7rem 0.9rem;background:var(--bg3);border-radius:13px;border:1px solid var(--bd);font-size:0.8rem;transition:all .22s cubic-bezier(.4,0,.2,1)}
 .audio-history-item:hover{border-color:var(--ac);box-shadow:0 6px 18px var(--sh);transform:translateY(-2px)}

@@ -46,6 +46,13 @@ DIRECTOR_WORKFLOW_PATH = os.path.join(os.path.dirname(__file__), "..", "workflow
 # Singularity（乱神版 V3）导演台工作流：基于 easy timelineEditor 的 timeline_data 格式
 DIRECTOR_SINGULARITY_WORKFLOW_PATH = os.path.join(os.path.dirname(__file__), "..", "workflow-api", "Ltx2.3 Singularity+EasyMedia导演工作台(乱神版)V3.json")
 TTS_CLONE_WORKFLOW_PATH = os.path.join(os.path.dirname(__file__), "..", "workflow-api", "vocpm语音克隆.json")
+# Qwen3-TD-TTS 语音克隆工作流（备选，TDQwen3TTSVoiceClone 节点）
+TTS_CLONE_QWEN3_WORKFLOW_PATH = os.path.join(os.path.dirname(__file__), "..", "workflow-api", "Qwen3-TD-TTS语音克隆.json")
+# 语音克隆工作流可选项：key → 文件路径（前端在设置中选择，默认 vocpm）
+TTS_CLONE_WORKFLOWS = {
+    'vocpm': TTS_CLONE_WORKFLOW_PATH,
+    'qwen3': TTS_CLONE_QWEN3_WORKFLOW_PATH,
+}
 
 
 def _new_task_id(prefix):
@@ -1020,11 +1027,14 @@ def comfy_fetch_view(filename, subfolder='', ftype='output'):
 
 
 def run_tts_clone_sync(params):
-    """语音克隆：上传参考音频 → 运行 Qwen3 克隆工作流 → 返回 base64 音频。
-    params: { ref_audio_b64, ref_audio_mime, text, ref_text(语气/参考文本) }"""
-    if not os.path.exists(TTS_CLONE_WORKFLOW_PATH):
-        return {'success': False, 'error': '未找到语音克隆工作流文件'}
-    with open(TTS_CLONE_WORKFLOW_PATH, 'r', encoding='utf-8') as f:
+    """语音克隆：上传参考音频 → 运行所选克隆工作流 → 返回 base64 音频。
+    params: { ref_audio_b64, ref_audio_mime, text, ref_text(语气/参考文本),
+              workflow: 'vocpm'(默认,VoxCPM) | 'qwen3'(Qwen3-TD-TTS) }"""
+    wf_key = (params.get('workflow') or 'vocpm').strip().lower()
+    wf_path = TTS_CLONE_WORKFLOWS.get(wf_key, TTS_CLONE_WORKFLOW_PATH)
+    if not os.path.exists(wf_path):
+        return {'success': False, 'error': f'未找到语音克隆工作流文件（{wf_key}）'}
+    with open(wf_path, 'r', encoding='utf-8') as f:
         workflow = json.load(f)
 
     # 1. 上传参考音频到 ComfyUI input
@@ -1054,10 +1064,16 @@ def run_tts_clone_sync(params):
             node['inputs']['audio'] = server_name
             node['inputs'].pop('audioUI', None)
         elif ct == 'voxcpm_nkxx_unified_generator':
-            # 台词写入 target_text；语气（tone）写入 control_instruction（可控指令）
+            # VoxCPM：台词写入 target_text；语气（tone）写入 control_instruction（可控指令）
             # 没有语气时置空 control_instruction（不保留工作流里的示例值）
             node['inputs']['target_text'] = params.get('text', '')
             node['inputs']['control_instruction'] = (params.get('ref_text') or '').strip()
+            if 'seed' in node['inputs']:
+                node['inputs']['seed'] = rseed
+        elif ct == 'TDQwen3TTSVoiceClone':
+            # Qwen3-TD-TTS：台词写入 text；语气/参考文本写入 ref_text（可空）
+            node['inputs']['text'] = params.get('text', '')
+            node['inputs']['ref_text'] = (params.get('ref_text') or '').strip()
             if 'seed' in node['inputs']:
                 node['inputs']['seed'] = rseed
 
@@ -1918,6 +1934,7 @@ class Handler(BaseHTTPRequestHandler):
                 'ref_audio_mime': d.get('ref_audio_mime', 'audio/wav'),
                 'text': d.get('text', ''),
                 'ref_text': d.get('ref_text', ''),   # 语气/参考文本
+                'workflow': (d.get('workflow') or 'vocpm'),   # 语音克隆工作流：vocpm(默认) | qwen3
             }
             if not params['text']:
                 self.send_json({'success': False, 'error': '缺少台词文本'}, 400); return

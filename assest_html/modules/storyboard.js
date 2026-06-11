@@ -295,7 +295,7 @@ const StoryboardModule = {
                                 ${refAudUrl ? `<audio controls preload="none" src="${refAudUrl}" style="height:30px"></audio>` : '<span class="sb-dim-hint">未选</span>'}
                                 <button class="btn-ghost btn-tiny" onclick="StoryboardModule.pickRefAudio('${g.id}')">选参考音色</button>
                             </div>
-                            ${audUrl ? `<div class="sb-single-audio-row"><span class="sb-dim-hint">成品配音：</span><audio controls preload="none" src="${audUrl}" style="height:30px"></audio></div>` : ''}
+                            ${audUrl ? `<div class="sb-single-audio-row"><span class="sb-dim-hint">成品配音：</span><audio controls preload="none" src="${audUrl}" style="height:30px"></audio>${App.audioDragHandle(audUrl, `分镜配音_${g.id}.${(aud.mime||'').includes('mpeg')?'mp3':(aud.mime||'').includes('flac')?'flac':'wav'}`, '拖出')}</div>` : ''}
                         </div>
                     </div>
                 </div>
@@ -813,10 +813,11 @@ const StoryboardModule = {
         this.render(this.projectId);
         // 重新打开弹窗（render 会刷新底层列表，但弹窗内容还在）
         try {
-            const submit = await API.post('/api/storyboard/tts_clone', {
-                ref_audio_b64: refB64, ref_audio_mime: refAud.mime || 'audio/wav',
-                text: text.trim(), ref_text: tone.trim(),
-            });
+const submit = await API.post('/api/storyboard/tts_clone', {
+ref_audio_b64: refB64, ref_audio_mime: refAud.mime || 'audio/wav',
+text: text.trim(), ref_text: tone.trim(),
+workflow: (Storage.getSettings().voiceSettings || {}).cloneWorkflow || 'vocpm',
+});
             if (!submit.success || !submit.task_id) throw new Error(submit.error || '提交失败');
             const result = await this._pollTask(submit.task_id, null, 1200);
             delete this._polls['si_aud_' + gid];
@@ -2250,10 +2251,11 @@ const StoryboardModule = {
             return false;
         }
         try {
-            const submit = await API.post('/api/storyboard/tts_clone', {
-                ref_audio_b64: refB64, ref_audio_mime: refMime,
-                text: dialogue.text, ref_text: dialogue.tone || '',
-            });
+const submit = await API.post('/api/storyboard/tts_clone', {
+ref_audio_b64: refB64, ref_audio_mime: refMime,
+text: dialogue.text, ref_text: dialogue.tone || '',
+workflow: (Storage.getSettings().voiceSettings || {}).cloneWorkflow || 'vocpm',
+});
             if (!submit.success || !submit.task_id) throw new Error(submit.error || '提交失败');
             const result = await this._pollTask(submit.task_id, null, 1200);
             if (result && result.audio_base64) {
@@ -2456,10 +2458,11 @@ const StoryboardModule = {
         }, 1000);
 
         try {
-            const submit = await API.post('/api/storyboard/tts_clone', {
-                ref_audio_b64: refB64, ref_audio_mime: refMime,
-                text, ref_text: tone,
-            });
+const submit = await API.post('/api/storyboard/tts_clone', {
+ref_audio_b64: refB64, ref_audio_mime: refMime,
+text, ref_text: tone,
+workflow: (Storage.getSettings().voiceSettings || {}).cloneWorkflow || 'vocpm',
+});
             if (!submit.success || !submit.task_id) throw new Error(submit.error || '提交失败');
             const result = await this._pollTask(submit.task_id, null, 1200);
             clearInterval(intv);
@@ -2661,7 +2664,7 @@ const StoryboardModule = {
         const imageClips = [];
         const audioClips = [];
         let cursor = 0;
-        const TRANS_DEF_SEC = 1;    // 转场默认时长（秒）
+        const TRANS_DEF_SEC = 0.5;  // 转场默认时长（秒）：默认 0.5s，少占总时长，仍可在预览区手动调大
         segments.forEach(s => {
             const len = s.length || DEF;
             const imgUid = Storage._uid();
@@ -2700,7 +2703,10 @@ const StoryboardModule = {
             guideStrength: '1.00',                // 引导强度默认值（1.0=最大约束，最贴近引导图）
             epsilon: 0.3,                         // 过渡柔和度（0.001 硬切 ~ 1.0 最柔）
             workflow: 'singularity',              // 导演台工作流：'singularity'(默认，乱神版V3) | 'director'(旧 LTXDirector)
-            useCustomAudio: audioClips.length > 0, // 使用音频：ON=用上传音频；OFF=让模型按提示词从零生成音频（含环境音）
+            // 使用音频：ON=用上传音频；OFF=让模型按提示词从零生成音频（含环境音）。
+            // 默认随工作流联动：乱神版(singularity)默认不勾选（让模型生成语音），旧导演台(director)默认勾选（用上传音频）。
+            // 初始 workflow=singularity → 默认 false。
+            useCustomAudio: false,
             selectedUid: (imageClips[0] && imageClips[0].uid) || null,  // 预览/编辑当前选中的图像段
             playFrame: 0, playing: false,
         };
@@ -2810,7 +2816,6 @@ const StoryboardModule = {
                                 onchange="StoryboardModule.tlSetUseAudio(this.checked)">
                             使用音频
                         </label>
-                        <span class="sb-dir-eps-hint">${tl.useCustomAudio ? '用上传音频' : '模型生成音频'}</span>
                     </span>
                     <span class="sb-dir-sep"></span>
                     <span class="sb-dir-guide sb-dir-selwrap">合成工作流
@@ -3244,16 +3249,22 @@ const StoryboardModule = {
         n = Math.max(0, Math.min(1, n));   // 引导强度上限 0~1
         this._tl.guideStrength = n.toFixed(2);
     },
-    tlSetUseAudio(checked) {
-        this._tl.useCustomAudio = !!checked;
-        // 同步更新旁边的提示文案
-        const hint = document.querySelector('#tlUseAudio')?.closest('.sb-dir-guide')?.querySelector('.sb-dir-eps-hint');
-        if (hint) hint.textContent = this._tl.useCustomAudio ? '用上传音频' : '模型生成音频';
-    },
-    tlSetWorkflow(v) {
-        // 导演台工作流选择：'singularity'(默认) | 'director'
-        this._tl.workflow = (v === 'director') ? 'director' : 'singularity';
-    },
+tlSetUseAudio(checked) {
+this._tl.useCustomAudio = !!checked;
+this._tl._audioUserSet = true;   // 标记用户手动设置过：之后切换工作流不再自动覆盖
+},
+tlSetWorkflow(v) {
+// 导演台工作流选择：'singularity'(默认) | 'director'
+const tl = this._tl;
+tl.workflow = (v === 'director') ? 'director' : 'singularity';
+// 「使用音频」默认随工作流联动：乱神版(singularity)默认不勾选，旧导演台(director)默认勾选。
+// 仅当用户未手动改过该开关时才自动调整，避免覆盖用户的显式选择。
+if (!tl._audioUserSet) {
+    tl.useCustomAudio = (tl.workflow === 'director');
+    const cb = document.getElementById('tlUseAudio');
+    if (cb) cb.checked = tl.useCustomAudio;
+}
+},
     tlSetFps(v) {
         // 切换帧率：按比例重算所有段的帧数，保持镜头「秒数」不变。
         // 降到 24fps → 同样秒数的镜头帧数变少 → 总帧数变少 → 二阶段(上采样精修)显存与耗时显著下降。
@@ -3491,7 +3502,7 @@ const StoryboardModule = {
             ? `<div class="sb-dir-prev-talk"><span class="sb-dir-prev-talk-icon">🗣️</span><span class="sb-dir-prev-talk-text">${this.esc(talk)}</span></div>`
             : '';
         const transVal = c ? (c.shotTransition || '') : '';
-        const transDur = c ? (Number(c.transitionDur) || 1) : 1;
+        const transDur = c ? (Number(c.transitionDur) || 0.5) : 0.5;
         host.innerHTML = c ? `
             ${talkBar}
             <div class="sb-dir-prev-prompt">
@@ -3581,13 +3592,13 @@ const StoryboardModule = {
         if (!c) return;
         c.shotTransition = v;
         // 文本从无到有时给个默认时长，避免合成时被当作 0=不插入
-        if (v && !(Number(c.transitionDur) > 0)) c.transitionDur = 1;
+        if (v && !(Number(c.transitionDur) > 0)) c.transitionDur = 0.5;
     },
     // 编辑转场时长（秒）
     tlSetTransDur(uid, v) {
         const c = this._tl && this._tl.imageClips.find(x => x.uid === uid);
         if (!c) return;
-        const sec = Math.max(0.5, Number(v) || 1);
+        const sec = Math.max(0.5, Number(v) || 0.5);
         c.transitionDur = sec;
     },
     // 音频同步：找到命中当前帧的音频块，定位 audio 元素到 (trimStart + 帧偏移)
@@ -3750,7 +3761,7 @@ const StoryboardModule = {
                 prompt: c.prompt || (c.dialogue && c.dialogue.text) || '',
                 start: c.start, length: segLen,
                 transition: tText,
-                transition_dur: tText ? (Number(c.transitionDur) || 1) : 0,
+                transition_dur: tText ? (Number(c.transitionDur) || 0.5) : 0,
             });
         }
         // 至少要有一个带图的段（编辑接口/合成需要画面）

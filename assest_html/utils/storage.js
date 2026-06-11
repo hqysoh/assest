@@ -275,7 +275,7 @@ const Storage = {
 }
 
 规则：所有字符串单行无换行；local_prompts 适配 Singularity/OmniCine：**除中文对白外一律英文自然语言**、不要任何标题（如 **Character Prompt...**）、动作连贯、按时间分段（如 0-5 seconds / 5-10 seconds，依镜头时长划分）、依次自然衔接「场景风格→动作→运镜构图→光照色调→对白→声音设计→质感」；对白格式为「英文说话人 said：中文对白原文」（冒号后中文原文，严禁翻译成英文、严禁加引号、严禁换行、严禁出现 [Surprise-wa] 等配音标签），无对白写 no character dialogue；local_prompts 固定 4 项、每项末尾带「无字幕」；nano_banana_prompt 的 4 个面板必须与 local_prompts 第1/2/3/4项逐一对应（同序、同画面内容），并在正文中明确声明「画面干净、无字幕、无任何文字/字母/水印/logo」；shot_transitions 固定 4 项（最后一项可空，其余末尾带「无字幕」）；dialogues 固定 4 项（无台词的面板字段留空，text 可按情绪偶尔点缀配音情绪标签如 [Surprise-wa]/[Confirmation-en]）；配音情绪标签**只允许出现在 dialogues[].text**，严禁出现在 local_prompts/global_prompt/nano_banana_prompt/shot_transitions 等画面提示词中；幻想生物形态描述完整。`,
-            voiceSettings: { textTemplate: "我是{name}，这是我的音色，很高兴认识你" },
+            voiceSettings: { textTemplate: "我是{name}，这是我的音色，很高兴认识你", cloneWorkflow: 'vocpm' },
             imageApiGroups: [
                 {
                     id: 'default',
