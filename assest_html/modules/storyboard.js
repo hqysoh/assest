@@ -1571,7 +1571,6 @@ workflow: (Storage.getSettings().voiceSettings || {}).cloneWorkflow || 'vocpm',
                 </div>
                 <p class="form-hint" style="margin:-0.3rem 0 0.2rem">尺寸 / 画质默认取自设置，可在此临时调整。</p>
 
-                // ===== @图0：上一镜末帧衔接说明（仅非首组四宫格显示） =====
                 ${(() => {
                     const prev = !g.single ? this._prevGroupLastImage(g) : null;
                     if (!prev) return '';
