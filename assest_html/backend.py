@@ -794,16 +794,28 @@ def migrate_if_needed():
 
 # ==================== ComfyUI helpers ====================
 
-def find_comfyui_dirs():
-    global COMFYUI_BASE
-    candidates = [
+def _comfyui_candidates():
+    """ComfyUI 根目录候选（环境变量 COMFYUI_DIR 优先；含已知 Windows 路径与跨平台常见位置）。"""
+    cands = []
+    env = os.environ.get("COMFYUI_DIR", "").strip()
+    if env:
+        cands.append(env)
+    cands += [
         "F:\\Desktop\\ComfyUI\\ComfyUI_Mie_2026_V8.0_Base\\ComfyUI",
         os.path.join(os.path.dirname(__file__), "..", "..", "ComfyUI"),
         os.path.join(os.path.dirname(__file__), "..", "..", "ComfyUI_windows_portable", "ComfyUI"),
         os.path.expanduser("~\\ComfyUI"),
+        os.path.expanduser("~/ComfyUI"),
+        os.path.expanduser("~/Downloads/ComfyUI"),
+        os.path.expanduser("~/Documents/ComfyUI"),
+        os.path.expanduser("~/Desktop/ComfyUI"),
     ]
-    for d in candidates:
-        if os.path.isdir(d):
+    return cands
+
+def find_comfyui_dirs():
+    global COMFYUI_BASE
+    for d in _comfyui_candidates():
+        if d and os.path.isdir(d):
             COMFYUI_BASE = d
             output_dir = os.path.join(d, "output")
             temp_dir = os.path.join(d, "temp")
@@ -1034,16 +1046,52 @@ def comfy_fetch_view(filename, subfolder='', ftype='output'):
 def comfy_output_abspath(filename, subfolder='', ftype='output'):
     """计算 ComfyUI 产物在本机磁盘上的绝对路径（backend 与 ComfyUI 同机时可用）。
     用于「索引到生成目录、不复制」的视频历史：前端通过 /api/video_file?path= 直接流式读取。
-    取不到 COMFYUI_BASE 或文件不存在时返回空串。"""
-    if not COMFYUI_BASE or not filename:
+
+    多重兜底，尽量拿到带子文件夹的真实路径：
+      ① 优先按 COMFYUI_BASE/<type>/<subfolder>/<filename> 直接拼接；
+      ② COMFYUI_BASE 未探测到时，遍历候选根目录重试；
+      ③ subfolder 用反斜杠/正斜杠混写时做归一化；
+      ④ 最后在 output 目录树里递归查找同名文件兜底（应对子文件夹未回传/延迟落盘）。
+    取不到则返回空串。"""
+    if not filename:
         return ''
     sub = (ftype or 'output')   # output / temp / input
-    base = os.path.join(COMFYUI_BASE, sub)
-    p = os.path.join(base, subfolder or '', filename)
-    try:
-        return p if os.path.isfile(p) else ''
-    except Exception:
-        return ''
+    fname = os.path.basename(filename)   # 防止 filename 里自带路径
+    subnorm = (subfolder or '').replace('\\', '/').strip('/')
+
+    # 候选根目录：已探测到的 COMFYUI_BASE 优先，否则遍历所有候选
+    bases = []
+    if COMFYUI_BASE:
+        bases.append(COMFYUI_BASE)
+    for d in _comfyui_candidates():
+        if d and d not in bases and os.path.isdir(d):
+            bases.append(d)
+
+    for root in bases:
+        typedir = os.path.join(root, sub)
+        # ① 标准拼接（含子文件夹）
+        p = os.path.join(typedir, *subnorm.split('/'), fname) if subnorm else os.path.join(typedir, fname)
+        try:
+            if os.path.isfile(p):
+                return p
+        except Exception:
+            pass
+        # ② 直接放在 type 目录下（无子文件夹）
+        p2 = os.path.join(typedir, fname)
+        try:
+            if os.path.isfile(p2):
+                return p2
+        except Exception:
+            pass
+        # ③ 递归兜底：在 type 目录树里找同名文件（应对子文件夹未回传/大小写差异）
+        try:
+            if os.path.isdir(typedir):
+                for dirpath, _dirs, files in os.walk(typedir):
+                    if fname in files:
+                        return os.path.join(dirpath, fname)
+        except Exception:
+            pass
+    return ''
 
 
 def run_tts_clone_sync(params):
