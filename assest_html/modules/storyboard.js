@@ -1643,6 +1643,20 @@ workflow: (Storage.getSettings().voiceSettings || {}).cloneWorkflow || 'vocpm',
 
     _renderFgAssetRows(gid, assets) {
         const grid = assets.map(a => {
+            // 「上一镜末帧」衔接图：独立渲染（与人物/道具/场景区分），缺失时高亮提示
+            if (a.prevLink) {
+                const thumb = a.url
+                    ? `<img src="${a.url}" alt="上一镜末帧">`
+                    : `<div class="sb-fg-ref-miss">上一组第${a.prevGroupNo || ''}组<br>尚无末帧图</div>`;
+                const acts = `<button class="btn-ghost btn-tiny" onclick="StoryboardModule._fgRemovePrevLink('${gid}')" title="不把上一镜末帧作为参考图（@图序号会自动顺延）">✕ 移除衔接</button>`;
+                return `<div class="sb-fg-ref-cell is-prev ${a.missing ? 'is-miss' : ''}">
+                    <div class="sb-fg-ref-idx">@图${a.idx}</div>
+                    <div class="sb-fg-ref-thumb">${thumb}</div>
+                    <div class="sb-fg-ref-name" title="上一组的最后一个分镜画面，用于宫格间衔接">🔗 上一镜末帧</div>
+                    <div class="sb-fg-ref-type">${a.missing ? '<span style="color:var(--err)">⚠️ 缺末帧</span>' : '衔接 · 自动'}</div>
+                    <div class="sb-fg-ref-acts">${acts}</div>
+                </div>`;
+            }
             const typeIcon = a.type === 'character' ? '👤' : (a.type === 'prop' ? '🔧' : (a.type === 'scene' ? '🏞️' : '📌'));
             const typeLab = a.extra ? '附加' : this._typeLabel(a.type);
             const thumb = a.url
@@ -1681,10 +1695,15 @@ workflow: (Storage.getSettings().voiceSettings || {}).cloneWorkflow || 'vocpm',
         }).join('');
 
         // 底部「添加参考图」入口（追加额外参考图，不依赖人物/道具/场景库）
-        const excludedCount = (((Storage.getProject(this.projectId).storyboardGroups || []).find(x => x.id === gid) || {}).refExcluded || []).length;
+        const gObj = (Storage.getProject(this.projectId).storyboardGroups || []).find(x => x.id === gid) || {};
+        const excludedCount = (gObj.refExcluded || []).length;
+        // 「恢复上一镜衔接」：仅当本组是非首组四宫格、且衔接被用户移除过时显示
+        const canPrevLink = !gObj.single && this._prevGroupLastImage(gObj);
+        const showRestorePrev = canPrevLink && gObj.prevLinkDisabled;
         const addBtn = `<div class="sb-fg-ref-add">
             <button class="btn-ghost btn-tiny" onclick="StoryboardModule._fgAddExtra('${gid}')">＋ 添加参考图（选已生成图/切割分镜）</button>
             <button class="btn-ghost btn-tiny" onclick="StoryboardModule._fgUploadExtra('${gid}')">📁 上传新图</button>
+            ${showRestorePrev ? `<button class="btn-ghost btn-tiny" onclick="StoryboardModule._fgRestorePrevLink('${gid}')">🔗 恢复上一镜衔接</button>` : ''}
             ${excludedCount ? `<button class="btn-ghost btn-tiny" onclick="StoryboardModule._fgRestoreExcluded('${gid}')">↺ 恢复已移除（${excludedCount}）</button>` : ''}
         </div>`;
 
@@ -1805,6 +1824,30 @@ workflow: (Storage.getSettings().voiceSettings || {}).cloneWorkflow || 'vocpm',
         this.render(this.projectId);
     },
 
+    // 移除「上一镜末帧」衔接图（标记 prevLinkDisabled）：@图序号自动顺延
+    _fgRemovePrevLink(gid) {
+        const p = Storage.getProject(this.projectId);
+        const g = (p.storyboardGroups || []).find(x => x.id === gid);
+        if (!g) return;
+        g.prevLinkDisabled = true;
+        Storage.updateProject(this.projectId, { storyboardGroups: p.storyboardGroups });
+        App.showToast('已移除上一镜衔接，本组将不再以上一镜末帧作为 @图1', 'success');
+        this._showFgConfigModal(gid);
+        this.render(this.projectId);
+    },
+
+    // 恢复「上一镜末帧」衔接图
+    _fgRestorePrevLink(gid) {
+        const p = Storage.getProject(this.projectId);
+        const g = (p.storyboardGroups || []).find(x => x.id === gid);
+        if (!g) return;
+        g.prevLinkDisabled = false;
+        Storage.updateProject(this.projectId, { storyboardGroups: p.storyboardGroups });
+        App.showToast('已恢复上一镜衔接（@图1=上一镜末帧）', 'success');
+        this._showFgConfigModal(gid);
+        this.render(this.projectId);
+    },
+
     // 通用图片选择器（单选，含人物/道具/场景图 + 四宫格/切割分镜），选定后回调 mediaId。
     // 选完会自动回到四宫格配置弹窗（由各回调内 _showFgConfigModal 负责）。
     _fgImagePicker(gid, title, onPick) {
@@ -1887,12 +1930,15 @@ workflow: (Storage.getSettings().voiceSettings || {}).cloneWorkflow || 'vocpm',
         const checkAssets = this._collectRefAssets(g);
         const missing = checkAssets.filter(a => a.missing);
         if (missing.length) {
-            const names = missing.map(a => `@图${a.idx} ${a.name}`).join('、');
+            const names = missing.map(a => a.prevLink ? `@图${a.idx} 上一镜末帧（上一组尚未生成图）` : `@图${a.idx} ${a.name}`).join('、');
+            const hasPrevMiss = missing.some(a => a.prevLink);
             const ok = await App.confirm({
                 title: '⚠️ 缺少参考图',
-                message: `还有 ${missing.length} 张参考图未上传：\n${names}\n\n确定在缺少参考图的情况下继续生成吗？`,
+                message: `还有 ${missing.length} 张参考图未就绪：\n${names}\n\n`
+                    + (hasPrevMiss ? '其中「上一镜末帧」缺失：请先生成上一组的四宫格（或上一个单分镜），否则本组将失去与上一镜的画面衔接。\n\n' : '')
+                    + '确定在缺少参考图的情况下继续生成吗？',
                 okText: '仍要生成',
-                cancelText: '去上传',
+                cancelText: '去补齐',
             });
             if (!ok) return;
         }
@@ -1921,8 +1967,17 @@ workflow: (Storage.getSettings().voiceSettings || {}).cloneWorkflow || 'vocpm',
 
         this._updFgProgressText(gid, `参考图就绪（${refB64.length} 张）· 正在提交任务…`);
 
+        // 若启用了「上一镜末帧」衔接且该图确实传入（@图1 有图），在提示词最前追加衔接说明，
+        // 让模型把第一格画面与上一镜末帧顺接，保证宫格之间过渡自然流畅（不污染存储的 nanoPrompt）。
+        let basePrompt = g.nanoPrompt || g.globalPrompt || '';
+        const prevAsset = assets.find(a => a.prevLink && a.url);
+        if (prevAsset) {
+            const linkNote = `衔接要求：@图${prevAsset.idx} 是上一组镜头的最后一个画面，请让本组第 1 格从该画面自然延续（保持人物、场景、光线、色调、镜头视角的连贯），使宫格之间以及与上一镜的过渡平滑流畅、无跳变。`;
+            basePrompt = linkNote + '\n' + basePrompt;
+        }
+
         const submit = await API.post('/api/storyboard/fourgrid', {
-            prompt: g.nanoPrompt || g.globalPrompt,
+            prompt: basePrompt,
             ref_images: refB64,
             api_url: activeGroup.url,
             api_key: activeGroup.apiKey,
@@ -2140,11 +2195,32 @@ workflow: (Storage.getSettings().voiceSettings || {}).cloneWorkflow || 'vocpm',
             });
         };
 
+        // 收尾：① 非首组默认把「上一组最后一个分镜图像」作为 @图1 插到最前（用于宫格间衔接）；
+        //       ② 统一重排 @图N 索引（unshift 后位置即顺序）；③ 截断至 8 张（编辑接口上限）。
+        const finalize = () => {
+            // 上一组末帧衔接图：默认开启，用户可在清单里「移除」(g.prevLinkDisabled=true)
+            if (!g.single && !g.prevLinkDisabled) {
+                const prev = this._prevGroupLastImage(g);
+                if (prev) {
+                    // prev.url 有图 → 正常衔接；无图 → 缺失占位，渲染时高亮提示
+                    out.unshift({
+                        idx: 0, type: 'prev', name: '上一镜末帧',
+                        item: null, mediaId: prev.mediaId || null, url: prev.url || '',
+                        missing: !prev.url, prevLink: true,
+                        prevGroupNo: prev.groupNo,
+                    });
+                }
+            }
+            // 重排 idx：unshift 后数组顺序即 @图N 顺序
+            out.forEach((a, i) => { a.idx = i + 1; });
+            return out.slice(0, 8);
+        };
+
         // ① 若 CC/Mock 标注了 ref_assets → 按其顺序（额外参考图仍需追加到末尾）
         if (Array.isArray(g.refAssets) && g.refAssets.length) {
             g.refAssets.forEach(r => push(r.type || 'character', r.name));
             pushExtras();
-            return out.slice(0, 8);
+            return finalize();
         }
 
         // ② 人物：按 dialogues 首次出现顺序
@@ -2170,7 +2246,30 @@ workflow: (Storage.getSettings().voiceSettings || {}).cloneWorkflow || 'vocpm',
         // ⑤ 用户手动添加的额外参考图（不依赖人物/道具/场景库，直接引用任意已生成图像/切割分镜/上传图）
         pushExtras();
 
-        return out.slice(0, 8);
+        return finalize();
+    },
+
+    // 定位「上一组的最后一个分镜图像」用于宫格间衔接（按 storyboardGroups 数组顺序取当前组之前最近的一组）：
+    //   · 上一组是四宫格 → 取第 4 个 panel 的切分图（panelImages[3]）；缺则回退整张四宫格图（fourGridImageId）
+    //   · 上一组是单分镜 → 取其 imageId
+    // 返回 { url, mediaId, groupNo } —— 找不到上一组返回 null；上一组存在但未生成图返回 { url:'' } 以便缺失提示。
+    _prevGroupLastImage(g) {
+        const p = Storage.getProject(this.projectId);
+        const groups = p.storyboardGroups || [];
+        const idx = groups.findIndex(x => x.id === g.id);
+        if (idx <= 0) return null;   // 首组（idx 0）或未找到 → 无上一组
+        const prev = groups[idx - 1];
+        const groupNo = idx;   // 上一组的「第几组」(1-based 显示)
+        let mediaId = null;
+        if (prev.single) {
+            mediaId = prev.imageId != null ? prev.imageId : null;
+        } else {
+            const panels = prev.panelImages || [];
+            mediaId = panels[3] != null ? panels[3] : (prev.fourGridImageId != null ? prev.fourGridImageId : null);
+        }
+        if (mediaId == null) return { url: '', mediaId: null, groupNo };
+        const m = Storage.getMediaById(this.projectId, mediaId);
+        return { url: m ? Storage.mediaUrl(m.data) : '', mediaId: m ? m.id : null, groupNo };
     },
 
     // 兼容旧接口：返回 url 列表（仅有图的）
