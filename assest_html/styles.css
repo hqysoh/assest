@@ -631,6 +631,22 @@ input[type="checkbox"]{accent-color:var(--ac)}
 /* 视频历史：拖放导入区 */
 .sb-vh-drop{border:2px dashed var(--bd);border-radius:10px;padding:0.7rem 1rem;text-align:center;color:var(--t3);font-size:0.8rem;margin-bottom:0.9rem;transition:all .15s;cursor:default}
 .sb-vh-drop.drag-over{border-color:var(--ac);background:var(--grad-soft);color:var(--ac2)}
+/* 视频历史：排序下拉 */
+.sb-vh-sortwrap{display:inline-flex;align-items:center;gap:0.3rem;font-size:0.78rem;color:var(--t2)}
+/* 缩略图容器需相对定位，承载右上角删除 / 左上角拖拽把手 */
+.sb-vh-thumb{position:relative}
+.sb-vh-video{cursor:grab}
+.sb-vh-video:active{cursor:grabbing}
+/* 右上角删除按钮 */
+.sb-vh-del{position:absolute;top:5px;right:5px;z-index:3;width:22px;height:22px;line-height:20px;text-align:center;border:none;border-radius:50%;background:rgba(0,0,0,.55);color:#fff;font-size:0.78rem;cursor:pointer;opacity:0;transition:opacity .15s,background .15s}
+.sb-vh-card:hover .sb-vh-del{opacity:1}
+.sb-vh-del:hover{background:var(--err,#fb7185)}
+/* 左上角拖拽排序把手 */
+.sb-vh-handle{position:absolute;top:5px;left:5px;z-index:3;padding:1px 6px;border-radius:6px;background:rgba(0,0,0,.55);color:#fff;font-size:0.9rem;line-height:1;cursor:grab;opacity:0;transition:opacity .15s;user-select:none}
+.sb-vh-card:hover .sb-vh-handle{opacity:1}
+.sb-vh-handle:active{cursor:grabbing}
+/* 拖拽排序：目标卡片高亮 */
+.sb-vh-card.vh-drop-target{outline:2px dashed var(--ac);outline-offset:-2px}
 .sb-pick-inline{display:inline-flex;align-items:center;gap:0.28rem;font-size:0.68rem;color:var(--t2);cursor:pointer;margin-left:0.4rem}
 /* 已标记 → 整行/整卡置灰 */
 .sb-marked{opacity:0.5;filter:grayscale(0.6)}

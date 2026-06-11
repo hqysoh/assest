@@ -4250,58 +4250,151 @@ if (!tl._audioUserSet) {
         this.projectId = projectId;
         const p = Storage.getProject(projectId);
         const list = Array.isArray(p.storyboardVideos) ? p.storyboardVideos.slice() : [];
-        // 排序：先按 分镜起始组号，再按 结束组号，再按序号 seq（即 分镜1-4(0)、分镜1-4(1)…）
-        list.sort((a, b) =>
-            (a.groupFrom - b.groupFrom) || (a.groupTo - b.groupTo) || (a.seq - b.seq) || (a.createdAt - b.createdAt));
+        const sortMode = p.vhSort || 'custom';   // custom 手动拖拽 / time 生成时间 / name 名称
+        this._vhSortList(list, sortMode);
 
         const host = document.getElementById('tabContent');
-        if (!list.length) {
-            host.innerHTML = `<div class="empty-state"><div class="empty-state-icon">🎞️</div>
-                <div class="empty-state-text">还没有合成视频。在「分镜」页勾选分镜后点「合成视频」生成，成片会自动出现在这里。</div></div>`;
-            return;
-        }
-        const rows = list.map(v => {
-            const name = this._vhDisplayName(v);
-            const fname = `${name}.mp4`.replace(/[\\/:*?"<>|]/g, '_');
-            const url = this._videoFileUrl(v.file);
-            const missing = !v.file;
-            const drag = (!missing && url) ? App.videoDragHandle(url, fname, '拖到剪辑软件') : '';
-            const videoEl = (!missing && url)
-                ? `<video class="sb-vh-video" controls preload="metadata" src="${url}"></video>`
-                : `<div class="sb-vh-missing">⚠️ 未索引到视频文件（可能 ComfyUI 输出已清理或非同机）</div>`;
-            const when = v.createdAt ? new Date(v.createdAt).toLocaleString() : '';
-            const watched = !!v.watched;
-            const tag = v.imported ? ' <span class="sb-vh-tag sb-vh-tag-imp">导入</span>' : '';
-            return `<div class="sb-vh-card ${watched ? 'is-watched' : ''}">
-                <div class="sb-vh-thumb">${videoEl}</div>
-                <div class="sb-vh-meta">
-                    <div class="sb-vh-name" title="${this.esc(v.file || '')}">${this.esc(name)}${tag}${watched ? ' <span class="sb-vh-tag">已看</span>' : ''}</div>
-                    <div class="sb-vh-sub">${v.frames ? v.frames + ' 帧 · ' : ''}${when}</div>
-                    <div class="sb-vh-acts">
-                        ${drag}
-                        <button class="btn-ghost btn-tiny" onclick="StoryboardModule.renameVideoHistory('${v.id}')" title="重命名：自定义该视频的显示名（同时影响拖出/下载的文件名）">✏️ 重命名</button>
-                        ${(!missing && url) ? `<a class="btn-ghost btn-tiny" href="${url}" download="${fname}">⬇ 下载</a>` : ''}
-                        <button class="btn-ghost btn-tiny sb-vh-markbtn ${watched ? 'on' : ''}" onclick="StoryboardModule.toggleVideoWatched('${v.id}')" title="标记为已看：点击后本卡片置灰，便于区分哪些已播放（可再次点击取消）">${watched ? '↺ 标记已看' : '✓ 标记已看'}</button>
-                        <button class="btn-ghost btn-tiny btn-ghost-danger" onclick="StoryboardModule.delVideoHistory('${v.id}')" title="从历史中删除（仅移除索引记录，不会删除磁盘上的原视频文件）">🗑️ 删除</button>
-                    </div>
-                </div>
-            </div>`;
-        }).join('');
-
-        host.innerHTML = `
+        const head = `
             <div class="sb-vh-head">
                 <span class="sb-count">共 ${list.length} 个视频</span>
                 <button class="btn-secondary btn-tiny" onclick="StoryboardModule.pickImportVideo()" title="选择本地视频导入：后端落盘一次后索引该路径（之后不再复制），可播放/重命名/拖到剪辑软件">📥 导入视频</button>
                 <input type="file" id="vhImportInput" accept="video/*,.mp4,.webm,.mov,.mkv,.avi,.gif" multiple style="display:none" onchange="StoryboardModule.onImportVideoInput(event)">
-                <span class="sb-vh-hint">合成视频自动命名「分镜起-止(第几次)」；可重命名。拖动「拖到剪辑软件」导出。索引到生成/导入目录，不重复复制、省空间。</span>
+                <label class="sb-vh-sortwrap" title="排序方式：手动拖拽 / 按生成时间 / 按名称">排序
+                    <select class="sb-dir-select" onchange="StoryboardModule.setVhSort(this.value)">
+                        <option value="custom" ${sortMode === 'custom' ? 'selected' : ''}>手动拖拽</option>
+                        <option value="time" ${sortMode === 'time' ? 'selected' : ''}>生成时间</option>
+                        <option value="name" ${sortMode === 'name' ? 'selected' : ''}>名称</option>
+                    </select>
+                </label>
+                <span class="sb-vh-hint">${sortMode === 'custom' ? '拖动卡片左上「⠿」把手可调整顺序；' : '切到「手动拖拽」可自定义顺序；'}鼠标按住视频画面直接拖到剪辑软件即可导出。</span>
             </div>
             <div class="sb-vh-drop" id="vhDropZone"
                 ondragover="event.preventDefault();this.classList.add('drag-over')"
                 ondragleave="this.classList.remove('drag-over')"
                 ondrop="StoryboardModule.onImportVideoDrop(event)">
                 ⬇️ 把视频文件拖到这里导入（自动索引，不复制原文件之外的多余副本）
-            </div>
-            <div class="sb-vh-grid">${rows}</div>`;
+            </div>`;
+
+        if (!list.length) {
+            host.innerHTML = head + `<div class="empty-state"><div class="empty-state-icon">🎞️</div>
+                <div class="empty-state-text">还没有视频。在「分镜」页合成，或上方「导入视频」/拖入即可。</div></div>`;
+            return;
+        }
+        const canDrag = (sortMode === 'custom');
+        const rows = list.map(v => {
+            const name = this._vhDisplayName(v);
+            const fname = `${name}.mp4`.replace(/[\\/:*?"<>|]/g, '_');
+            const url = this._videoFileUrl(v.file);
+            const missing = !v.file;
+            const when = v.createdAt ? new Date(v.createdAt).toLocaleString() : '';
+            const watched = !!v.watched;
+            const tag = v.imported ? ' <span class="sb-vh-tag sb-vh-tag-imp">导入</span>' : '';
+            const mime = /\.webm$/i.test(fname) ? 'video/webm' : /\.mov$/i.test(fname) ? 'video/quicktime' : /\.gif$/i.test(fname) ? 'image/gif' : 'video/mp4';
+            // 视频画面本身可拖出到剪辑软件（DownloadURL）；controls 仍可点击播放
+            const videoEl = (!missing && url)
+                ? `<video class="sb-vh-video" controls preload="metadata" src="${url}" draggable="true"
+                       ondragstart="App.onAudioDragStart(event, '${url.replace(/'/g, "\\'")}', '${fname.replace(/'/g, "\\'")}', '${mime}')"
+                       title="按住画面拖到剪辑软件/桌面即可导出该视频"></video>`
+                : `<div class="sb-vh-missing">⚠️ 未索引到视频文件（可能 ComfyUI 输出已清理或非同机）</div>`;
+            // 删除移到右上角
+            const delBtn = `<button class="sb-vh-del" onclick="StoryboardModule.delVideoHistory('${v.id}')" title="从历史中删除（仅移除索引记录，不会删除磁盘上的原视频文件）">✕</button>`;
+            // 手动拖拽排序把手
+            const handle = canDrag
+                ? `<span class="sb-vh-handle" draggable="true"
+                       ondragstart="StoryboardModule.onVhSortDragStart(event,'${v.id}')"
+                       title="按住拖拽调整顺序">⠿</span>`
+                : '';
+            return `<div class="sb-vh-card ${watched ? 'is-watched' : ''}" data-vid="${v.id}"
+                    ${canDrag ? `ondragover="StoryboardModule.onVhSortDragOver(event)" ondrop="StoryboardModule.onVhSortDrop(event,'${v.id}')" ondragleave="this.classList.remove('vh-drop-target')"` : ''}>
+                <div class="sb-vh-thumb">
+                    ${handle}
+                    ${delBtn}
+                    ${videoEl}
+                </div>
+                <div class="sb-vh-meta">
+                    <div class="sb-vh-name" title="${this.esc(v.file || '')}">${this.esc(name)}${tag}${watched ? ' <span class="sb-vh-tag">已看</span>' : ''}</div>
+                    <div class="sb-vh-sub">${v.frames ? v.frames + ' 帧 · ' : ''}${when}</div>
+                    <div class="sb-vh-acts">
+                        <button class="btn-ghost btn-tiny" onclick="StoryboardModule.renameVideoHistory('${v.id}')" title="重命名：自定义该视频的显示名（同时影响拖出的文件名）">✏️ 重命名</button>
+                        ${(!missing) ? `<button class="btn-ghost btn-tiny" onclick="StoryboardModule.openVideoPath('${v.id}')" title="在系统文件管理器中定位该视频文件（需 backend 与浏览器同机）">📂 打开路径</button>` : ''}
+                        <button class="btn-ghost btn-tiny sb-vh-markbtn ${watched ? 'on' : ''}" onclick="StoryboardModule.toggleVideoWatched('${v.id}')" title="标记为已看：点击后本卡片置灰，便于区分哪些已播放（可再次点击取消）">${watched ? '↺ 标记已看' : '✓ 标记已看'}</button>
+                    </div>
+                </div>
+            </div>`;
+        }).join('');
+
+        host.innerHTML = head + `<div class="sb-vh-grid">${rows}</div>`;
+    },
+
+    // 按当前排序模式对列表排序（custom 用 order，缺省回退到原分镜组顺序）
+    _vhSortList(list, mode) {
+        if (mode === 'time') {
+            list.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));   // 新→旧
+        } else if (mode === 'name') {
+            list.sort((a, b) => this._vhDisplayName(a).localeCompare(this._vhDisplayName(b), 'zh-Hans-CN'));
+        } else {
+            // custom：优先 order 字段；无 order 的回退到「分镜组号→seq→时间」
+            list.sort((a, b) => {
+                const ao = (a.order != null), bo = (b.order != null);
+                if (ao && bo) return a.order - b.order;
+                if (ao) return -1;
+                if (bo) return 1;
+                return (a.groupFrom - b.groupFrom) || (a.groupTo - b.groupTo) || (a.seq - b.seq) || (a.createdAt - b.createdAt);
+            });
+        }
+        return list;
+    },
+
+    // 切换排序方式
+    setVhSort(mode) {
+        Storage.updateProject(this.projectId, { vhSort: mode });
+        this.renderVideoHistory(this.projectId);
+    },
+
+    // 打开视频所在路径（系统文件管理器中定位）
+    async openVideoPath(id) {
+        const p = Storage.getProject(this.projectId);
+        const v = (p.storyboardVideos || []).find(x => x.id === id);
+        if (!v || !v.file) { App.showToast('该视频未索引到本机路径', 'error'); return; }
+        try {
+            const r = await API.post('/api/open_path', { path: v.file });
+            if (!r || !r.success) throw new Error((r && r.error) || '打开失败');
+        } catch (e) {
+            App.showToast(`打开路径失败：${e.message || e}`, 'error');
+        }
+    },
+
+    // ===== 手动拖拽排序 =====
+    onVhSortDragStart(ev, id) {
+        this._vhDragId = id;
+        ev.dataTransfer.effectAllowed = 'move';
+        try { ev.dataTransfer.setData('text/plain', id); } catch (e) {}
+    },
+    onVhSortDragOver(ev) {
+        if (!this._vhDragId) return;
+        ev.preventDefault();
+        ev.dataTransfer.dropEffect = 'move';
+        const card = ev.currentTarget;
+        if (card) card.classList.add('vh-drop-target');
+    },
+    onVhSortDrop(ev, targetId) {
+        ev.preventDefault();
+        const card = ev.currentTarget; if (card) card.classList.remove('vh-drop-target');
+        const fromId = this._vhDragId; this._vhDragId = null;
+        if (!fromId || fromId === targetId) return;
+        const p = Storage.getProject(this.projectId);
+        const list = (p.storyboardVideos || []).slice();
+        // 先按当前显示顺序确定基准序列
+        this._vhSortList(list, p.vhSort || 'custom');
+        const fromIdx = list.findIndex(v => v.id === fromId);
+        const toIdx = list.findIndex(v => v.id === targetId);
+        if (fromIdx < 0 || toIdx < 0) return;
+        const [moved] = list.splice(fromIdx, 1);
+        list.splice(toIdx, 0, moved);
+        // 重新写入 order，并切到 custom 模式（手动拖拽即固定该顺序）
+        list.forEach((v, i) => { v.order = i; });
+        Storage.updateProject(this.projectId, { storyboardVideos: list, vhSort: 'custom' });
+        this.renderVideoHistory(this.projectId);
     },
 
     // 显示名：用户重命名优先；否则合成视频用「分镜X-Y(N)」，导入视频用原文件名（去扩展名）

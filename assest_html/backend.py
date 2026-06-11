@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import json
 import os
+import sys
 import sqlite3
 import subprocess
 import re
@@ -1693,6 +1694,7 @@ class Handler(BaseHTTPRequestHandler):
             '/api/sb_task': self.sb_task_status,                       # 统一查询分镜异步任务
             '/api/sb_cancel': self.sb_task_cancel,                      # 打断分镜异步任务（真实中断 ComfyUI）
             '/api/import_video': self.import_video_handler,            # 视频历史：拖放/上传导入，落盘一次后索引绝对路径
+            '/api/open_path': self.open_path_handler,                  # 视频历史：在系统文件管理器中定位/打开该文件
         }
         handler = routes.get(self.path)
         if handler: handler()
@@ -1810,6 +1812,28 @@ class Handler(BaseHTTPRequestHandler):
             with open(fpath, 'wb') as f:
                 f.write(base64.b64decode(b64))
             self.send_json({'success': True, 'video_file': fpath, 'video_name': fname})
+        except Exception as e:
+            import traceback; traceback.print_exc()
+            self.send_json({'success': False, 'error': str(e)}, 500)
+
+    def open_path_handler(self):
+        """在系统文件管理器中定位/选中该文件（视频历史「打开路径」）。
+        macOS: open -R；Windows: explorer /select；Linux: xdg-open 所在目录。仅 backend 与浏览器同机时有效。"""
+        try:
+            d = self.read_body()
+            fpath = (d.get('path', '') or '').strip()
+            if not fpath or not os.path.exists(fpath):
+                self.send_json({'success': False, 'error': '文件不存在或路径为空'}, 404); return
+            sysname = sys.platform
+            if sysname == 'darwin':
+                subprocess.Popen(['open', '-R', fpath])
+            elif sysname.startswith('win'):
+                # explorer /select 需要反斜杠路径
+                subprocess.Popen(['explorer', '/select,', os.path.normpath(fpath)])
+            else:
+                # Linux：定位到所在目录
+                subprocess.Popen(['xdg-open', os.path.dirname(fpath) or '.'])
+            self.send_json({'success': True})
         except Exception as e:
             import traceback; traceback.print_exc()
             self.send_json({'success': False, 'error': str(e)}, 500)
