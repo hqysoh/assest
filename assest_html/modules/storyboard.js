@@ -62,6 +62,7 @@ const StoryboardModule = {
                     <button class="btn-secondary" onclick="StoryboardModule.exportContextJson()" title="导出剧本 / 人物 / 道具 / 场景为 JSON，供另一台机器导入或生成分镜复用">📤 导出素材</button>
                     <button class="btn-secondary" onclick="StoryboardModule.openTimeline()" ${groups.length ? '' : 'disabled'}>🎞️ 合成视频（时间轴）</button>
                     <button class="btn-secondary sb-mark-global" onclick="StoryboardModule.markAllSelectedGlobal()" ${groups.length ? '' : 'disabled'} title="把所有组中当前『已勾选合成』的分镜一键标记为已处理（置灰并取消勾选）">✅ 标记已选</button>
+                    <button class="btn-secondary sb-unsel-all" onclick="StoryboardModule.unselectAllGlobal()" ${groups.length ? '' : 'disabled'} title="取消所有组中当前『已勾选合成』的分镜（不改变已标记状态）">☐ 全部取消</button>
                     <button class="btn-secondary btn-ghost-danger sb-del-all" onclick="StoryboardModule.delAllGroups()" ${groups.length ? '' : 'disabled'} title="一键删除当前项目下的全部分镜（四宫格 + 单分镜），此操作不可撤销">🗑️ 全部删除</button>
                     <label class="sb-clone-wf" title="语音克隆工作流：人物/分镜配音使用的 ComfyUI 工作流，VoxCPM 与 Qwen3-TD-TTS 音色风格略有差异，可按需切换">🎙️
                         <select onchange="StoryboardModule.setCloneWorkflow(this.value)">
@@ -1080,6 +1081,28 @@ workflow: (Storage.getSettings().voiceSettings || {}).cloneWorkflow || 'vocpm',
         if (!count) { App.showToast('当前没有勾选『合成视频』的分镜', 'info'); return; }
         Storage.updateProject(this.projectId, { storyboardGroups: groups });
         App.showToast(`已标记全局 ${count} 个分镜`, 'success');
+        this.render(this.projectId);
+    },
+
+    // 全部取消：把所有组中当前『已勾选合成』的分镜全部取消勾选（不改变已标记状态）
+    unselectAllGlobal() {
+        const p = Storage.getProject(this.projectId);
+        const groups = p.storyboardGroups || [];
+        if (!groups.length) return;
+        let count = 0;
+        groups.forEach(g => {
+            if (g.single) {
+                if (g.selected !== false) { g.selected = false; count++; }
+                return;
+            }
+            if (!Array.isArray(g.panelSelected)) g.panelSelected = [true, true, true, true];
+            [0, 1, 2, 3].forEach(i => {
+                if (g.panelSelected[i] !== false) { g.panelSelected[i] = false; count++; }
+            });
+        });
+        if (!count) { App.showToast('当前没有已勾选『合成视频』的分镜', 'info'); return; }
+        Storage.updateProject(this.projectId, { storyboardGroups: groups });
+        App.showToast(`已取消 ${count} 个分镜的勾选`, 'success');
         this.render(this.projectId);
     },
 
