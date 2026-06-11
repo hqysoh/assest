@@ -1570,10 +1570,33 @@ workflow: (Storage.getSettings().voiceSettings || {}).cloneWorkflow || 'vocpm',
                     </div>
                 </div>
                 <p class="form-hint" style="margin:-0.3rem 0 0.2rem">尺寸 / 画质默认取自设置，可在此临时调整。</p>
+
+                // ===== @图0：上一镜末帧衔接说明（仅非首组四宫格显示） =====
+                ${(() => {
+                    const prev = !g.single ? this._prevGroupLastImage(g) : null;
+                    if (!prev) return '';
+                    const disabled = !!g.prevLinkDisabled;
+                    const prevInfo = prev.url
+                        ? `<span style="color:var(--ac);font-weight:600">✅ 第${prev.groupNo}组末帧已就绪</span>`
+                        : `<span style="color:var(--err);font-weight:600">⚠️ 第${prev.groupNo}组尚无末帧图</span>`;
+                    return `
+                    <div class="form-group sb-fg-prev0 ${disabled ? 'sb-fg-prev0-disabled' : ''}" id="fgPrevLinkArea">
+                        <label class="form-label">@图0 · 上一镜末帧衔接 ${disabled ? '<span style="color:var(--t3);font-size:0.72rem;font-weight:400;margin-left:0.3rem">（已移除）</span>' : ''}</label>
+                        <div style="display:flex;gap:0.4rem;align-items:flex-start">
+                            <div style="flex:1;min-width:0">${prevInfo}</div>
+                            ${prev.url ? `<img src="${prev.url}" style="width:80px;height:50px;object-fit:cover;border-radius:6px;border:1px solid var(--bd)">` : ''}
+                        </div>
+                        <textarea class="form-textarea sb-fg-prev0-ta" id="fgPrevLinkNote" style="min-height:52px;${disabled ? 'opacity:.5' : ''}"
+                            placeholder="衔接要求（可选）：@图0 是上一组最后一个画面。请让本组第 1 格从该画面自然延续（人物/场景/光线/色调/镜头视角连贯），使宫格之间过渡平滑流畅、无跳变。"
+                            onchange="StoryboardModule._saveFgPrevLinkNote('${gid}', this.value)"
+                        >${this.esc(g.prevLinkNote || '')}</textarea>
+                    </div>`;
+                })()}
+
                 <div class="form-group">
                     <label class="form-label">四宫格生成提示词（nano，可改）</label>
                     <textarea class="form-textarea" id="fgPrompt" style="min-height:120px" onchange="StoryboardModule._saveFgPrompt('${gid}', this.value)">${this.esc(g.nanoPrompt || g.globalPrompt || '')}</textarea>
-                    <p class="form-hint" style="margin-top:0.3rem">提示词开头应按 <b>@图1=…、@图2=…</b> 顺序声明参考图，下方列表的索引就是接口收到的顺序。</p>
+                    <p class="form-hint" style="margin-top:0.3rem">提示词开头应按 <b>@图1=…、@图2=…</b> 顺序声明参考图，下方列表的索引就是接口收到的顺序（@图0 为额外衔接图，不占此序号）。</p>
                 </div>
                 <div class="form-group">
                     <div class="meta-header">
@@ -1630,6 +1653,15 @@ workflow: (Storage.getSettings().voiceSettings || {}).cloneWorkflow || 'vocpm',
         g.nanoPrompt = v;
         Storage.updateProject(this.projectId, { storyboardGroups: p.storyboardGroups });
         this.render(this.projectId);
+    },
+
+    // 弹窗里改了 @图0 衔接说明 → 立即写回 storage
+    _saveFgPrevLinkNote(gid, val) {
+        const p = Storage.getProject(this.projectId);
+        const g = (p.storyboardGroups || []).find(x => x.id === gid);
+        if (!g) return;
+        g.prevLinkNote = (val || '').trim();
+        Storage.updateProject(this.projectId, { storyboardGroups: p.storyboardGroups });
     },
 
     _onFgGroupChange() {
@@ -1967,13 +1999,17 @@ workflow: (Storage.getSettings().voiceSettings || {}).cloneWorkflow || 'vocpm',
 
         this._updFgProgressText(gid, `参考图就绪（${refB64.length} 张）· 正在提交任务…`);
 
-        // 若启用了「上一镜末帧」衔接且该图确实传入（@图1 有图），在提示词最前追加衔接说明，
-        // 让模型把第一格画面与上一镜末帧顺接，保证宫格之间过渡自然流畅（不污染存储的 nanoPrompt）。
+        // 若启用了「上一镜末帧」衔接且该图确实传入（@图0 有图），在提示词最前拼接 @图0 衔接说明：
+        //   优先使用用户在 @图0 区域编辑的 prevLinkNote（允许自定义）；
+        //   为空时使用默认衔接要求；
+        //   用户移除衔接（prevLinkDisabled）时不拼接任何内容（@图0 区域置灰）。
         let basePrompt = g.nanoPrompt || g.globalPrompt || '';
         const prevAsset = assets.find(a => a.prevLink && a.url);
-        if (prevAsset) {
-            const linkNote = `衔接要求：@图${prevAsset.idx} 是上一组镜头的最后一个画面，请让本组第 1 格从该画面自然延续（保持人物、场景、光线、色调、镜头视角的连贯），使宫格之间以及与上一镜的过渡平滑流畅、无跳变。`;
-            basePrompt = linkNote + '\n' + basePrompt;
+        if (prevAsset && !g.prevLinkDisabled) {
+            const userNote = (g.prevLinkNote || '').trim();
+            const defaultNote = `@图0 是上一组第${prevAsset.groupNo || ''}组的最后一个画面（末帧），请让本组第 1 格从该画面自然延续（保持人物、场景、光线、色调、镜头视角的连贯），使宫格之间以及与上一镜的过渡平滑流畅、无跳变。`;
+            const linkNote = userNote || defaultNote;
+            basePrompt = `@图0 ${linkNote}\n` + basePrompt;
         }
 
         const submit = await API.post('/api/storyboard/fourgrid', {

@@ -670,6 +670,12 @@ input[type="checkbox"]{accent-color:var(--ac)}
 .sb-fg-ref-cell.is-extra{border-color:rgba(99,102,241,.4);background:rgba(99,102,241,.06)}
 .sb-fg-ref-cell.is-prev{border-color:rgba(52,211,153,.5);background:rgba(52,211,153,.08)}
 .sb-fg-ref-cell.is-prev.is-miss{border-color:rgba(251,113,133,.45);background:rgba(251,113,133,.08)}
+/* @图0 上一镜末帧衔接说明区域 */
+.sb-fg-prev0{border:1px solid var(--bd);border-radius:10px;padding:0.55rem;background:var(--bg3);transition:all .18s}
+.sb-fg-prev0:hover{border-color:var(--ac)}
+.sb-fg-prev0-disabled{opacity:.45;pointer-events:none;background:var(--bg2);border-color:var(--bd)}
+.sb-fg-prev0-disabled .form-label{color:var(--t3)}
+.sb-fg-prev0-ta{font-size:0.8rem;line-height:1.4;resize:vertical}
 /* 参考图单元的操作按钮区（选图/上传/更换/清除/删除） */
 .sb-fg-ref-acts{display:flex;flex-wrap:wrap;gap:0.25rem;justify-content:center;margin-top:0.1rem}
 .sb-fg-ref-acts .btn-tiny{padding:0.12rem 0.4rem;font-size:0.62rem}
