@@ -1927,7 +1927,7 @@ workflow: (Storage.getSettings().voiceSettings || {}).cloneWorkflow || 'vocpm',
         if (!g) return;
         g.prevLinkDisabled = true;
         Storage.updateProject(this.projectId, { storyboardGroups: p.storyboardGroups });
-        App.showToast('已移除上一镜衔接，本组将不再以上一镜末帧作为 @图1', 'success');
+        App.showToast('已移除上一镜衔接，本组将不再以上一镜末帧作为 @图0', 'success');
         this._showFgConfigModal(gid);
         this.render(this.projectId);
     },
@@ -1939,7 +1939,7 @@ workflow: (Storage.getSettings().voiceSettings || {}).cloneWorkflow || 'vocpm',
         if (!g) return;
         g.prevLinkDisabled = false;
         Storage.updateProject(this.projectId, { storyboardGroups: p.storyboardGroups });
-        App.showToast('已恢复上一镜衔接（@图1=上一镜末帧）', 'success');
+        App.showToast('已恢复上一镜衔接（@图0=上一镜末帧）', 'success');
         this._showFgConfigModal(gid);
         this.render(this.projectId);
     },
@@ -2311,9 +2311,13 @@ workflow: (Storage.getSettings().voiceSettings || {}).cloneWorkflow || 'vocpm',
                     });
                 }
             }
-            // 重排 idx：unshift 后数组顺序即 @图N 顺序
-            out.forEach((a, i) => { a.idx = i + 1; });
-            return out.slice(0, 8);
+            // 重排 idx：上一镜末帧固定为 @图0（不占用 @图1 序号），其余参考图从 @图1 开始顺序编号。
+            let n = 0;
+            out.forEach((a) => { a.idx = a.prevLink ? 0 : (++n); });
+            // 截断至 8 张（编辑接口上限）；末帧衔接图始终保留，普通参考图最多 8 张。
+            const prevList = out.filter(a => a.prevLink);
+            const normalList = out.filter(a => !a.prevLink).slice(0, 8);
+            return prevList.concat(normalList);
         };
 
         // ① 若 CC/Mock 标注了 ref_assets → 按其顺序（额外参考图仍需追加到末尾）
@@ -4266,14 +4270,16 @@ if (!tl._audioUserSet) {
                 ? `<video class="sb-vh-video" controls preload="metadata" src="${url}"></video>`
                 : `<div class="sb-vh-missing">⚠️ 未索引到视频文件（可能 ComfyUI 输出已清理或非同机）</div>`;
             const when = v.createdAt ? new Date(v.createdAt).toLocaleString() : '';
-            return `<div class="sb-vh-card">
+            const watched = !!v.watched;
+            return `<div class="sb-vh-card ${watched ? 'is-watched' : ''}">
                 <div class="sb-vh-thumb">${videoEl}</div>
                 <div class="sb-vh-meta">
-                    <div class="sb-vh-name" title="${this.esc(v.file || '')}">${this.esc(name)}</div>
+                    <div class="sb-vh-name" title="${this.esc(v.file || '')}">${this.esc(name)}${watched ? ' <span class="sb-vh-tag">已看</span>' : ''}</div>
                     <div class="sb-vh-sub">${v.frames || 0} 帧 · ${when}</div>
                     <div class="sb-vh-acts">
                         ${drag}
                         ${(!missing && url) ? `<a class="btn-ghost btn-tiny" href="${url}" download="${fname}">⬇ 下载</a>` : ''}
+                        <button class="btn-ghost btn-tiny sb-vh-markbtn ${watched ? 'on' : ''}" onclick="StoryboardModule.toggleVideoWatched('${v.id}')" title="标记为已看：点击后本卡片置灰，便于区分哪些已播放（可再次点击取消）">${watched ? '↺ 标记已看' : '✓ 标记已看'}</button>
                         <button class="btn-ghost btn-tiny btn-ghost-danger" onclick="StoryboardModule.delVideoHistory('${v.id}')" title="从历史中删除（仅移除索引记录，不会删除 ComfyUI 生成目录里的原视频文件）">🗑️ 删除</button>
                     </div>
                 </div>
@@ -4293,6 +4299,19 @@ if (!tl._audioUserSet) {
         const list = (p.storyboardVideos || []).filter(v => v.id !== id);
         Storage.updateProject(this.projectId, { storyboardVideos: list });
         App.showToast('已从视频历史移除（未删除原文件）', 'success');
+        if (typeof ProjectModule !== 'undefined' && ProjectModule.currentTab === 'videos') {
+            this.renderVideoHistory(this.projectId);
+        }
+    },
+
+    // 标记/取消标记「已看」：标记后本卡片置灰，便于区分哪些已播放
+    toggleVideoWatched(id) {
+        const p = Storage.getProject(this.projectId);
+        const list = (p.storyboardVideos || []).slice();
+        const v = list.find(x => x.id === id);
+        if (!v) return;
+        v.watched = !v.watched;
+        Storage.updateProject(this.projectId, { storyboardVideos: list });
         if (typeof ProjectModule !== 'undefined' && ProjectModule.currentTab === 'videos') {
             this.renderVideoHistory(this.projectId);
         }

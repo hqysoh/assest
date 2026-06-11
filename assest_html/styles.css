@@ -621,6 +621,12 @@ input[type="checkbox"]{accent-color:var(--ac)}
 .sb-vh-name{font-weight:700;font-size:0.9rem;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .sb-vh-sub{font-size:0.72rem;color:var(--t3)}
 .sb-vh-acts{display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap;margin-top:0.2rem}
+/* 已看：整卡置灰（视频本身保留可点播放）*/
+.sb-vh-card.is-watched{opacity:.5;filter:grayscale(.6)}
+.sb-vh-card.is-watched:hover{opacity:.78}
+.sb-vh-card.is-watched .sb-vh-video{filter:grayscale(.4)}
+.sb-vh-tag{font-size:0.66rem;font-weight:600;color:#fff;background:var(--t3);border-radius:4px;padding:1px 5px;margin-left:0.3rem;vertical-align:middle}
+.sb-vh-markbtn.on{background:var(--grad-soft);border-color:var(--ac2);color:var(--ac2)}
 .sb-pick-inline{display:inline-flex;align-items:center;gap:0.28rem;font-size:0.68rem;color:var(--t2);cursor:pointer;margin-left:0.4rem}
 /* 已标记 → 整行/整卡置灰 */
 .sb-marked{opacity:0.5;filter:grayscale(0.6)}
