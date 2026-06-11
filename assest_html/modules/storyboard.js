@@ -1578,29 +1578,32 @@ workflow: (Storage.getSettings().voiceSettings || {}).cloneWorkflow || 'vocpm',
                     const prevStatus = prev.url
                         ? `✅ 第${prev.groupNo}组末帧就绪`
                         : `⚠️ 第${prev.groupNo}组尚无末帧`;
-                    // 取上一组最后一个面板的 localPrompt（用于展示给用户参考）
+                    // 取上一组最后一个面板的完整 localPrompt（用于写入默认衔接要求）
                     let lastLocal = '';
                     if (prev.groupNo) {
                         const groups = (Storage.getProject(this.projectId).storyboardGroups || []);
                         const pg = groups[prev.groupNo - 1];
                         if (pg) {
-                            if (pg.single) { lastLocal = (pg.globalPrompt || pg.prompt || '').slice(0, 80); }
-                            else { const lp = (pg.localPrompts || []); lastLocal = (lp[3] || lp[lp.length - 1] || '').slice(0, 90); }
+                            if (pg.single) { lastLocal = (pg.globalPrompt || pg.prompt || ''); }
+                            else { const lp = (pg.localPrompts || []); lastLocal = (lp[3] || lp[lp.length - 1] || ''); }
                         }
                     }
+                    // 默认衔接要求：带上上一组的 local_prompt，并说明由下游模型按四宫格要求自行决定是否参考
+                    const defaultNote = this._buildPrevLinkNote(lastLocal);
+                    // textarea 默认值：用户编辑过则用其值，否则用默认衔接要求
+                    const noteVal = (g.prevLinkNote != null && g.prevLinkNote !== '') ? g.prevLinkNote : defaultNote;
                     return `
                     <div class="form-group sb-fg-prev0 ${disabled ? 'sb-fg-prev0-disabled' : ''}" id="fgPrevLinkArea">
                         <div class="sb-fg-prev0-head">
-                            <span class="form-label">@图0 · 上一镜末帧</span>
+                            <span class="form-label">@图0 · 上一镜末帧 · 衔接要求（可编辑）</span>
                             <span class="sb-fg-prev0-st">${prevStatus}</span>
-                            ${disabled ? '<span class="sb-fg-prev0-off">（已移除）</span>' : ''}
+                            ${disabled ? '<span class="sb-fg-prev0-off">（已移除，不参与衔接）</span>' : ''}
                         </div>
-                        ${lastLocal ? `<div class="sb-fg-prev0-lp"><b>上一组面板4 提示词：</b><span>${this.esc(lastLocal)}</span></div>` : ''}
                         <textarea class="form-textarea sb-fg-prev0-ta" id="fgPrevLinkNote"
-                            style="min-height:38px;color:var(--t1);font-size:0.82rem;line-height:1.45;resize:vertical;${disabled ? 'opacity:.4;pointer-events:none;background:var(--bg2);color:var(--t3)' : ''}"
-                            placeholder="衔接要求（可编辑）：根据下方四宫格提示词自行决定是否参考 @图0，让本组第 1 格与上一镜末帧自然延续过渡。"
+                            style="min-height:72px;color:var(--t1);font-size:0.82rem;line-height:1.5;resize:vertical;${disabled ? 'opacity:.4;pointer-events:none;background:var(--bg2);color:var(--t3)' : ''}"
+                            ${disabled ? 'disabled' : ''}
                             onchange="StoryboardModule._saveFgPrevLinkNote('${gid}', this.value)"
-                        >${this.esc(g.prevLinkNote || '')}</textarea>
+                        >${this.esc(noteVal)}</textarea>
                     </div>`;
                 })()}
 
@@ -1673,6 +1676,24 @@ workflow: (Storage.getSettings().voiceSettings || {}).cloneWorkflow || 'vocpm',
         if (!g) return;
         g.prevLinkNote = (val || '').trim();
         Storage.updateProject(this.projectId, { storyboardGroups: p.storyboardGroups });
+    },
+
+    // 构造默认衔接要求：带上一组的 local_prompt，并说明由下游模型按四宫格要求自行决定是否参考
+    _buildPrevLinkNote(lastLocal) {
+        const lp = (lastLocal || '').trim();
+        const lpPart = lp ? `上一个宫格画面内容为：${lp}。` : '';
+        return `@图0 是上一组镜头的最后一个画面（末帧）。${lpPart}请根据下方四宫格要求，自行决定是否参考 @图0：若需衔接，则让本组第 1 格从该画面自然延续（保持人物、场景、光线、色调、镜头视角的连贯），使宫格之间过渡平滑流畅、无跳变。`;
+    },
+
+    // 取某组用于默认衔接要求的上一组 local_prompt 完整文本
+    _prevGroupLastLocal(g) {
+        const prev = this._prevGroupLastImage(g);
+        if (!prev || !prev.groupNo) return '';
+        const pg = (Storage.getProject(this.projectId).storyboardGroups || [])[prev.groupNo - 1];
+        if (!pg) return '';
+        if (pg.single) return (pg.globalPrompt || pg.prompt || '');
+        const lp = (pg.localPrompts || []);
+        return (lp[3] || lp[lp.length - 1] || '');
     },
 
     _onFgGroupChange() {
@@ -2018,9 +2039,9 @@ workflow: (Storage.getSettings().voiceSettings || {}).cloneWorkflow || 'vocpm',
         const prevAsset = assets.find(a => a.prevLink && a.url);
         if (prevAsset && !g.prevLinkDisabled) {
             const userNote = (g.prevLinkNote || '').trim();
-            const defaultNote = `@图0 是上一组第${prevAsset.groupNo || ''}组的最后一个画面（末帧），请让本组第 1 格从该画面自然延续（保持人物、场景、光线、色调、镜头视角的连贯），使宫格之间以及与上一镜的过渡平滑流畅、无跳变。`;
-            const linkNote = userNote || defaultNote;
-            basePrompt = `@图0 ${linkNote}\n` + basePrompt;
+            // 默认衔接要求与弹窗展示保持一致：带上一组 local_prompt，说明由下游模型按四宫格要求自行决定是否参考
+            const linkNote = userNote || this._buildPrevLinkNote(this._prevGroupLastLocal(g));
+            basePrompt = `${linkNote}\n` + basePrompt;
         }
 
         const submit = await API.post('/api/storyboard/fourgrid', {
