@@ -608,6 +608,19 @@ input[type="checkbox"]{accent-color:var(--ac)}
 .sb-compose-btn:active{transform:translateY(0)}
 .sb-compose-btn:disabled{opacity:.45;cursor:not-allowed;filter:grayscale(.5);box-shadow:none;transform:none}
 .sb-compose-ic{font-size:1.05rem}
+/* 视频历史 tab */
+.sb-vh-head{display:flex;align-items:center;gap:0.8rem;flex-wrap:wrap;margin-bottom:0.9rem}
+.sb-vh-hint{font-size:0.74rem;color:var(--t3)}
+.sb-vh-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:0.9rem}
+.sb-vh-card{border:1px solid var(--bd);border-radius:12px;overflow:hidden;background:var(--bg2);display:flex;flex-direction:column;transition:border-color .18s,box-shadow .18s}
+.sb-vh-card:hover{border-color:var(--ac);box-shadow:0 4px 14px rgba(0,0,0,.12)}
+.sb-vh-thumb{background:#000;aspect-ratio:16/9;display:flex;align-items:center;justify-content:center}
+.sb-vh-video{width:100%;height:100%;object-fit:contain;display:block}
+.sb-vh-missing{color:var(--t3);font-size:0.78rem;text-align:center;padding:1rem}
+.sb-vh-meta{padding:0.5rem 0.6rem;display:flex;flex-direction:column;gap:0.25rem}
+.sb-vh-name{font-weight:700;font-size:0.9rem;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sb-vh-sub{font-size:0.72rem;color:var(--t3)}
+.sb-vh-acts{display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap;margin-top:0.2rem}
 .sb-pick-inline{display:inline-flex;align-items:center;gap:0.28rem;font-size:0.68rem;color:var(--t2);cursor:pointer;margin-left:0.4rem}
 /* 已标记 → 整行/整卡置灰 */
 .sb-marked{opacity:0.5;filter:grayscale(0.6)}

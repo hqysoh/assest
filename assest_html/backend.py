@@ -1026,6 +1026,21 @@ def comfy_fetch_view(filename, subfolder='', ftype='output'):
     return None
 
 
+def comfy_output_abspath(filename, subfolder='', ftype='output'):
+    """计算 ComfyUI 产物在本机磁盘上的绝对路径（backend 与 ComfyUI 同机时可用）。
+    用于「索引到生成目录、不复制」的视频历史：前端通过 /api/video_file?path= 直接流式读取。
+    取不到 COMFYUI_BASE 或文件不存在时返回空串。"""
+    if not COMFYUI_BASE or not filename:
+        return ''
+    sub = (ftype or 'output')   # output / temp / input
+    base = os.path.join(COMFYUI_BASE, sub)
+    p = os.path.join(base, subfolder or '', filename)
+    try:
+        return p if os.path.isfile(p) else ''
+    except Exception:
+        return ''
+
+
 def run_tts_clone_sync(params):
     """语音克隆：上传参考音频 → 运行所选克隆工作流 → 返回 base64 音频。
     params: { ref_audio_b64, ref_audio_mime, text, ref_text(语气/参考文本),
@@ -1286,8 +1301,10 @@ def run_director_singularity_sync(params, task_id=None):
         content = comfy_fetch_view(item.get('filename', ''), item.get('subfolder', ''), item.get('type', 'output'))
         if not content:
             return {'success': False, 'error': '无法取回视频文件'}
+        vpath = comfy_output_abspath(item.get('filename', ''), item.get('subfolder', ''), item.get('type', 'output'))
         return {'success': True, 'video_base64': base64.b64encode(content).decode('utf-8'),
-                'mime': 'video/mp4', 'frames': total_frames}
+                'mime': 'video/mp4', 'frames': total_frames,
+                'video_file': vpath, 'video_name': item.get('filename', '')}
     finally:
         # 用完即删：无论成功/失败/取消，都清理本次上传到 input 的临时图
         comfy_cleanup_input_files(uploaded_names)
@@ -1521,8 +1538,10 @@ def run_director_sync(params, task_id=None):
     content = comfy_fetch_view(item.get('filename', ''), item.get('subfolder', ''), item.get('type', 'output'))
     if not content:
         return {'success': False, 'error': '无法取回视频文件'}
+    vpath = comfy_output_abspath(item.get('filename', ''), item.get('subfolder', ''), item.get('type', 'output'))
     return {'success': True, 'video_base64': base64.b64encode(content).decode('utf-8'),
-            'mime': 'video/mp4', 'frames': total_frames}
+            'mime': 'video/mp4', 'frames': total_frames,
+            'video_file': vpath, 'video_name': item.get('filename', '')}
 
 
 # ==================== HTTP Handler ====================
@@ -1541,9 +1560,67 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path.startswith('/api/media/'):
             self.serve_media()
+        elif self.path.startswith('/api/video_file'):
+            self.serve_video_file()
         else:
             self.send_response(200); self.send_header('Content-Type', 'text/plain')
             self.send_cors(); self.end_headers(); self.wfile.write(b'OK')
+
+    def serve_video_file(self):
+        """按绝对路径流式返回本机磁盘上的视频文件（索引到 ComfyUI 生成目录，不复制）。
+        支持 HTTP Range，便于 <video> 拖动播放与拖放到剪辑软件。
+        仅允许 .mp4/.webm/.mov/.mkv/.gif 等媒体扩展名，防止任意文件读取。"""
+        from urllib.parse import urlparse, parse_qs, unquote
+        qs = parse_qs(urlparse(self.path).query)
+        raw = (qs.get('path') or [''])[0]
+        fpath = unquote(raw)
+        ext = os.path.splitext(fpath)[1].lower()
+        allow = {'.mp4': 'video/mp4', '.webm': 'video/webm', '.mov': 'video/quicktime',
+                 '.mkv': 'video/x-matroska', '.gif': 'image/gif', '.avi': 'video/x-msvideo'}
+        if ext not in allow or not fpath or not os.path.isfile(fpath):
+            self.send_error(404, 'Not found'); return
+        mime = allow[ext]
+        try:
+            size = os.path.getsize(fpath)
+        except Exception:
+            self.send_error(404, 'Not found'); return
+        rng = self.headers.get('Range')
+        start, end = 0, size - 1
+        is_partial = False
+        if rng and rng.startswith('bytes='):
+            try:
+                part = rng.split('=', 1)[1].split('-')
+                if part[0]:
+                    start = int(part[0])
+                if len(part) > 1 and part[1]:
+                    end = int(part[1])
+                is_partial = True
+            except Exception:
+                start, end, is_partial = 0, size - 1, False
+        end = min(end, size - 1)
+        length = end - start + 1
+        self.send_response(206 if is_partial else 200)
+        self.send_header('Content-Type', mime)
+        self.send_header('Accept-Ranges', 'bytes')
+        self.send_header('Content-Length', str(length))
+        if is_partial:
+            self.send_header('Content-Range', f'bytes {start}-{end}/{size}')
+        self.send_cors()
+        self.end_headers()
+        try:
+            with open(fpath, 'rb') as f:
+                f.seek(start)
+                remaining = length
+                while remaining > 0:
+                    chunk = f.read(min(65536, remaining))
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+                    remaining -= len(chunk)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        except Exception:
+            pass
 
     def serve_media(self):
         rel = self.path[len('/api/media/'):]

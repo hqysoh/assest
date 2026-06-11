@@ -29,6 +29,7 @@ const ProjectModule = {
                 <button class="nav-tab ${this.currentTab === 'props' ? 'active' : ''}" onclick="ProjectModule.switchTab('props')">🔧 道具</button>
                 <button class="nav-tab ${this.currentTab === 'scenes' ? 'active' : ''}" onclick="ProjectModule.switchTab('scenes')">🏞️ 场景</button>
                 <button class="nav-tab ${this.currentTab === 'storyboard' ? 'active' : ''}" onclick="ProjectModule.switchTab('storyboard')">🎬 分镜</button>
+                <button class="nav-tab ${this.currentTab === 'videos' ? 'active' : ''}" onclick="ProjectModule.switchTab('videos')">🎞️ 视频历史</button>
             </div>
             <div id="tabContent" class="content-section"></div>
         `;
@@ -57,6 +58,9 @@ const ProjectModule = {
                 break;
             case 'storyboard':
                 StoryboardModule.render(this.currentProjectId);
+                break;
+            case 'videos':
+                StoryboardModule.renderVideoHistory(this.currentProjectId);
                 break;
         }
     },

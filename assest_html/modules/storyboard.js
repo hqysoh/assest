@@ -2917,9 +2917,20 @@ workflow: (Storage.getSettings().voiceSettings || {}).cloneWorkflow || 'vocpm',
             cursor += len;
         });
 
+        // 参与合成的分镜组号范围（用于视频历史命名「分镜X-Y」）：取 segments 涉及组在 all 中的序号
+        const involvedIdx = [];
+        segments.forEach(s => {
+            const gi = all.findIndex(x => x.id === s.groupId);
+            if (gi >= 0 && !involvedIdx.includes(gi)) involvedIdx.push(gi);
+        });
+        involvedIdx.sort((a, b) => a - b);
+        const groupFrom = involvedIdx.length ? involvedIdx[0] + 1 : 1;
+        const groupTo = involvedIdx.length ? involvedIdx[involvedIdx.length - 1] + 1 : 1;
+
         this._tl = {
             imageClips, audioClips,
             totalFrames: cursor,                 // 视频总长（可调）；超出部分置灰
+            groupFrom, groupTo,                  // 视频历史命名用：参与合成的分镜组号范围
             fps: this.FPS,
             pxPerFrame: 1.4,                      // 缩放：像素/帧
             globalPrompt: first.globalPrompt || first.prompt || '',
@@ -4019,7 +4030,7 @@ if (!tl._audioUserSet) {
             });
             if (!submit.success || !submit.task_id) throw new Error(submit.error || '提交失败');
             // 持久化任务：关弹窗 / 刷新后仍可恢复计时与轮询
-            this._saveVideoTask({ task_id: submit.task_id, start: Date.now(), projectId: this.projectId, totalFrames: total, fps: tl.fps });
+            this._saveVideoTask({ task_id: submit.task_id, start: Date.now(), projectId: this.projectId, totalFrames: total, fps: tl.fps, groupFrom: tl.groupFrom || 1, groupTo: tl.groupTo || 1 });
             this._startVideoTimer();
             this._pollVideoTask(submit.task_id);
             this._syncVideoUI();
@@ -4174,19 +4185,116 @@ if (!tl._audioUserSet) {
     },
 
     _onVideoDone(result) {
+        const task = this._loadVideoTask() || {};
         this._clearVideoTask(); this._stopVideoTimer(); this._videoPolling = null;
         this._syncVideoUI();
         const resEl = document.getElementById('tlVideoResult');
-        if (resEl && result.video_base64) {
-            const dataUrl = 'data:video/mp4;base64,' + result.video_base64;
-            resEl.innerHTML = `<video class="sb-result-video" controls autoplay src="${dataUrl}"></video>
-                <div class="sb-dir-cur" style="margin-top:.5rem">✅ 生成成功（${result.frames || 0} 帧）。右键视频可保存。</div>`;
-            const btn = document.getElementById('tlGenBtn'); if (btn) btn.textContent = '🔄 重新生成';
+        if (result && result.video_base64) {
+            // 写入「视频历史」：索引到 ComfyUI 生成目录（不复制、不存 base64），命名「分镜X-Y(N)」
+            this._addVideoHistory({
+                file: result.video_file || '',
+                rawName: result.video_name || '',
+                frames: result.frames || 0,
+                groupFrom: (this._tl && this._tl.groupFrom) || task.groupFrom || 1,
+                groupTo: (this._tl && this._tl.groupTo) || task.groupTo || 1,
+            });
+            if (resEl) {
+                const dataUrl = 'data:video/mp4;base64,' + result.video_base64;
+                resEl.innerHTML = `<video class="sb-result-video" controls autoplay src="${dataUrl}"></video>
+                    <div class="sb-dir-cur" style="margin-top:.5rem">✅ 生成成功（${result.frames || 0} 帧）。已存入「视频历史」，可在分镜页切到该 tab 拖放到剪辑软件。</div>`;
+                const btn = document.getElementById('tlGenBtn'); if (btn) btn.textContent = '🔄 重新生成';
+            }
             this._playDoneChime();                          // 成功提示音
-            App.showToast('🎬 视频生成完成', 'success');     // 配合弹窗已关时也有反馈
-        } else if (!result.video_base64) {
+            App.showToast('🎬 视频生成完成，已存入视频历史', 'success');
+        } else {
             this._saveVideoErr('视频生成失败：未产出视频');
             this._renderVideoErrBanner();
+        }
+    },
+
+    // 写入视频历史：同一「分镜X-Y」组合自动累加序号 (0)(1)(2)…
+    _addVideoHistory({ file, rawName, frames, groupFrom, groupTo }) {
+        const p = Storage.getProject(this.projectId);
+        const list = Array.isArray(p.storyboardVideos) ? p.storyboardVideos.slice() : [];
+        const baseName = `分镜${groupFrom}-${groupTo}`;
+        // 同一 base 已有多少条 → 决定本次序号
+        const seq = list.filter(v => v.baseName === baseName).length;
+        list.push({
+            id: Storage._uid(),
+            file: file || '',           // ComfyUI 生成目录的绝对路径（索引，不复制）
+            rawName: rawName || '',     // ComfyUI 原始文件名
+            frames: frames || 0,
+            groupFrom, groupTo,
+            baseName,                   // 「分镜X-Y」
+            seq,                        // 该组合内的序号
+            createdAt: Date.now(),
+        });
+        Storage.updateProject(this.projectId, { storyboardVideos: list });
+    },
+
+    // 视频文件可直接 GET 的 URL（后端按绝对路径流式返回，不复制）
+    _videoFileUrl(file) {
+        if (!file) return '';
+        const base = (Storage.API || '').replace(/\/$/, '');
+        return `${base}/api/video_file?path=${encodeURIComponent(file)}`;
+    },
+
+    // ============================================================
+    // 「视频历史」tab：列出已生成视频，命名「分镜X-Y(N)」，可播放/拖放/删除（索引磁盘文件，不复制）
+    // ============================================================
+    renderVideoHistory(projectId) {
+        this.projectId = projectId;
+        const p = Storage.getProject(projectId);
+        const list = Array.isArray(p.storyboardVideos) ? p.storyboardVideos.slice() : [];
+        // 排序：先按 分镜起始组号，再按 结束组号，再按序号 seq（即 分镜1-4(0)、分镜1-4(1)…）
+        list.sort((a, b) =>
+            (a.groupFrom - b.groupFrom) || (a.groupTo - b.groupTo) || (a.seq - b.seq) || (a.createdAt - b.createdAt));
+
+        const host = document.getElementById('tabContent');
+        if (!list.length) {
+            host.innerHTML = `<div class="empty-state"><div class="empty-state-icon">🎞️</div>
+                <div class="empty-state-text">还没有合成视频。在「分镜」页勾选分镜后点「合成视频」生成，成片会自动出现在这里。</div></div>`;
+            return;
+        }
+        const rows = list.map(v => {
+            const name = `${v.baseName}(${v.seq})`;
+            const fname = `${v.baseName}_${v.seq}.mp4`.replace(/[\\/:*?"<>|]/g, '_');
+            const url = this._videoFileUrl(v.file);
+            const missing = !v.file;
+            const drag = (!missing && url) ? App.videoDragHandle(url, fname, '拖到剪辑软件') : '';
+            const videoEl = (!missing && url)
+                ? `<video class="sb-vh-video" controls preload="metadata" src="${url}"></video>`
+                : `<div class="sb-vh-missing">⚠️ 未索引到视频文件（可能 ComfyUI 输出已清理或非同机）</div>`;
+            const when = v.createdAt ? new Date(v.createdAt).toLocaleString() : '';
+            return `<div class="sb-vh-card">
+                <div class="sb-vh-thumb">${videoEl}</div>
+                <div class="sb-vh-meta">
+                    <div class="sb-vh-name" title="${this.esc(v.file || '')}">${this.esc(name)}</div>
+                    <div class="sb-vh-sub">${v.frames || 0} 帧 · ${when}</div>
+                    <div class="sb-vh-acts">
+                        ${drag}
+                        ${(!missing && url) ? `<a class="btn-ghost btn-tiny" href="${url}" download="${fname}">⬇ 下载</a>` : ''}
+                        <button class="btn-ghost btn-tiny btn-ghost-danger" onclick="StoryboardModule.delVideoHistory('${v.id}')" title="从历史中删除（仅移除索引记录，不会删除 ComfyUI 生成目录里的原视频文件）">🗑️ 删除</button>
+                    </div>
+                </div>
+            </div>`;
+        }).join('');
+
+        host.innerHTML = `
+            <div class="sb-vh-head">
+                <span class="sb-count">共 ${list.length} 个合成视频</span>
+                <span class="sb-vh-hint">命名规则：分镜「起始组-结束组」(同组合内的第几次)；拖动「拖到剪辑软件」即可导出。索引到生成目录，不复制、省空间。</span>
+            </div>
+            <div class="sb-vh-grid">${rows}</div>`;
+    },
+
+    delVideoHistory(id) {
+        const p = Storage.getProject(this.projectId);
+        const list = (p.storyboardVideos || []).filter(v => v.id !== id);
+        Storage.updateProject(this.projectId, { storyboardVideos: list });
+        App.showToast('已从视频历史移除（未删除原文件）', 'success');
+        if (typeof ProjectModule !== 'undefined' && ProjectModule.currentTab === 'videos') {
+            this.renderVideoHistory(this.projectId);
         }
     },
 

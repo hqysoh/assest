@@ -159,6 +159,16 @@ const App = {
         return `<span class="audio-drag-handle" draggable="true" title="按住拖拽，可直接拖到剪辑软件或桌面导出该音频"
             ondragstart="App.onAudioDragStart(event, '${u.replace(/'/g, "\\'")}', '${f.replace(/'/g, "\\'")}')">⤓ ${this.esc ? this.esc(text) : text}</span>`;
     },
+    // 视频拖放 handle：复用 onAudioDragStart 的 DownloadURL 机制，mime 按扩展名推断（默认 video/mp4）
+    videoDragHandle(url, filename, label) {
+        if (!url) return '';
+        const f = (filename || 'video.mp4').replace(/[\\/:*?"<>|]/g, '_');
+        const u = String(url);
+        const text = label || '拖到剪辑软件';
+        const mime = /\.webm$/i.test(f) ? 'video/webm' : /\.mov$/i.test(f) ? 'video/quicktime' : /\.gif$/i.test(f) ? 'image/gif' : 'video/mp4';
+        return `<span class="audio-drag-handle" draggable="true" title="按住拖拽，可直接拖到剪辑软件或桌面导出该视频"
+            ondragstart="App.onAudioDragStart(event, '${u.replace(/'/g, "\\'")}', '${f.replace(/'/g, "\\'")}', '${mime}')">⤓ ${this.esc ? this.esc(text) : text}</span>`;
+    },
     onAudioDragStart(ev, url, filename, mime) {
         try {
             const dt = ev.dataTransfer;
