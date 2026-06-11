@@ -63,6 +63,13 @@ const SettingsModule = {
                 <div class="form-col"><label class="form-label">画质</label><select class="form-input" id="imgQuality" onchange="SettingsModule.saveImageDefaults()">${this.opts(['auto','low','medium','high'],defs.quality||'auto')}</select></div>
                 <div class="form-col"><label class="form-label">默认尺寸</label><select class="form-input" id="imgSize" onchange="SettingsModule.saveImageDefaults()">${this.sizeLabelOpts(defs.size||'auto')}</select></div>
             </div>
+            <div class="form-row">
+                <div class="form-col">
+                    <label class="form-label">四宫格去白边裁切（像素）</label>
+                    <input type="number" class="form-input" id="imgFgTrim" min="0" max="200" step="1" value="${Number.isFinite(+defs.fgTrim) ? +defs.fgTrim : 0}" onchange="SettingsModule.saveImageDefaults()" placeholder="0">
+                    <p class="form-hint">四宫格切分为 4 张时，每个面板四周向内裁掉的像素数，用于去掉宫格之间的白边/分隔线。0 = 不裁切。</p>
+                </div>
+            </div>
         </div>
 
         <div class="settings-section">
@@ -174,10 +181,14 @@ const SettingsModule = {
 
     saveImageDefaults() {
         const s = Storage.getSettings();
+        let fgTrim = parseInt((document.getElementById('imgFgTrim') || {}).value, 10);
+        if (!Number.isFinite(fgTrim) || fgTrim < 0) fgTrim = 0;
+        if (fgTrim > 200) fgTrim = 200;
         const defs = {
             ...(s.imageDefaults || {}),
             quality: document.getElementById('imgQuality').value,
-            size: document.getElementById('imgSize').value
+            size: document.getElementById('imgSize').value,
+            fgTrim
         };
         Storage.saveSettings({ imageDefaults: defs });
         this.flashSaved();

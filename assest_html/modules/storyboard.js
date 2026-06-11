@@ -2380,13 +2380,22 @@ workflow: (Storage.getSettings().voiceSettings || {}).cloneWorkflow || 'vocpm',
         const hw = Math.floor(img.naturalWidth / 2);
         const hh = Math.floor(img.naturalHeight / 2);
         const positions = [[0, 0], [hw, 0], [0, hh], [hw, hh]]; // 左上 右上 左下 右下
+        // 去白边：每个面板四周向内裁切 fgTrim 像素（设置中可改），避免宫格之间的白色分隔线/留白被切进画面
+        let trim = parseInt((Storage.getSettings().imageDefaults || {}).fgTrim, 10);
+        if (!Number.isFinite(trim) || trim < 0) trim = 0;
+        // 安全上限：裁切量不超过半格尺寸的 40%，防止把画面裁没
+        trim = Math.min(trim, Math.floor(Math.min(hw, hh) * 0.4));
         const ids = [null, null, null, null];
         for (let i = 0; i < 4; i++) {
+            const sx = positions[i][0] + trim;
+            const sy = positions[i][1] + trim;
+            const sw = Math.max(1, hw - trim * 2);
+            const sh = Math.max(1, hh - trim * 2);
             const cv = document.createElement('canvas');
-            cv.width = hw; cv.height = hh;
-            cv.getContext('2d').drawImage(img, positions[i][0], positions[i][1], hw, hh, 0, 0, hw, hh);
+            cv.width = sw; cv.height = sh;
+            cv.getContext('2d').drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
             const panelData = cv.toDataURL('image/png');
-            const entry = await Storage._addMedia(this.projectId, 'image', 'storyboards', g.id + '_panel' + i, panelData, null, { w: hw, h: hh });
+            const entry = await Storage._addMedia(this.projectId, 'image', 'storyboards', g.id + '_panel' + i, panelData, null, { w: sw, h: sh });
             ids[i] = entry.id;
         }
         g.panelImages = ids;

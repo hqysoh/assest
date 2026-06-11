@@ -289,7 +289,8 @@ const Storage = {
                 activeGroupId: 'default',
                 quality: 'auto',
                 size: 'auto',
-                model: 'dall-e-3'
+                model: 'dall-e-3',
+                fgTrim: 0            // 四宫格切分时每个面板四周向内裁切的像素（用于去掉宫格白边/分隔线），0=不裁切
             },
             theme: 'light'
         };
