@@ -628,9 +628,11 @@ input[type="checkbox"]{accent-color:var(--ac)}
 .sb-vh-tag{font-size:0.66rem;font-weight:600;color:#fff;background:var(--t3);border-radius:4px;padding:1px 5px;margin-left:0.3rem;vertical-align:middle}
 .sb-vh-tag-imp{background:var(--ac2,#7c3aed)}
 .sb-vh-markbtn.on{background:var(--grad-soft);border-color:var(--ac2);color:var(--ac2)}
-/* 视频历史：拖放导入区 */
-.sb-vh-drop{border:2px dashed var(--bd);border-radius:10px;padding:0.7rem 1rem;text-align:center;color:var(--t3);font-size:0.8rem;margin-bottom:0.9rem;transition:all .15s;cursor:default}
-.sb-vh-drop.drag-over{border-color:var(--ac);background:var(--grad-soft);color:var(--ac2)}
+/* 视频历史：整界面拖放导入区（覆盖整个 tab） */
+.sb-vh-root{position:relative;min-height:240px}
+.sb-vh-dropmask{display:none;position:absolute;inset:0;z-index:20;border:2px dashed var(--ac);border-radius:12px;background:var(--grad-soft);color:var(--ac2);font-size:0.95rem;font-weight:600;align-items:center;justify-content:center;text-align:center;pointer-events:none}
+.sb-vh-root.drag-over .sb-vh-dropmask{display:flex}
+.sb-vh-root.drag-over .sb-vh-grid{opacity:.35}
 /* 视频历史：排序下拉 */
 .sb-vh-sortwrap{display:inline-flex;align-items:center;gap:0.3rem;font-size:0.78rem;color:var(--t2)}
 /* 缩略图容器需相对定位，承载右上角删除 / 左上角拖拽把手 */

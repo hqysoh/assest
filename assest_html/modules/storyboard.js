@@ -4266,18 +4266,20 @@ if (!tl._audioUserSet) {
                         <option value="name" ${sortMode === 'name' ? 'selected' : ''}>名称</option>
                     </select>
                 </label>
-                <span class="sb-vh-hint">${sortMode === 'custom' ? '拖动卡片左上「⠿」把手可调整顺序；' : '切到「手动拖拽」可自定义顺序；'}鼠标按住视频画面直接拖到剪辑软件即可导出。</span>
-            </div>
-            <div class="sb-vh-drop" id="vhDropZone"
-                ondragover="event.preventDefault();this.classList.add('drag-over')"
-                ondragleave="this.classList.remove('drag-over')"
-                ondrop="StoryboardModule.onImportVideoDrop(event)">
-                ⬇️ 把视频文件拖到这里导入（自动索引，不复制原文件之外的多余副本）
+                <span class="sb-vh-hint">${sortMode === 'custom' ? '拖动卡片左上「⠿」把手可调整顺序；' : '切到「手动拖拽」可自定义顺序；'}鼠标按住视频画面直接拖到剪辑软件即可导出。把本地视频文件拖到本界面任意位置即可导入。</span>
             </div>`;
 
+        // 整个历史 tab 作为拖放导入区：拖入文件时整界面高亮（拖出/排序不带 Files，不会误触发）
+        const rootOpen = `<div class="sb-vh-root" id="vhDropZone"
+                ondragover="StoryboardModule.onImportVideoDragOver(event)"
+                ondragleave="StoryboardModule.onImportVideoDragLeave(event)"
+                ondrop="StoryboardModule.onImportVideoDrop(event)">
+                <div class="sb-vh-dropmask">⬇️ 松开即可导入视频（自动索引到生成/导入目录，不重复复制）</div>`;
+        const rootClose = `</div>`;
+
         if (!list.length) {
-            host.innerHTML = head + `<div class="empty-state"><div class="empty-state-icon">🎞️</div>
-                <div class="empty-state-text">还没有视频。在「分镜」页合成，或上方「导入视频」/拖入即可。</div></div>`;
+            host.innerHTML = head + rootOpen + `<div class="empty-state"><div class="empty-state-icon">🎞️</div>
+                <div class="empty-state-text">还没有视频。在「分镜」页合成，或点「导入视频」/把视频文件拖到本界面任意位置即可。</div></div>` + rootClose;
             return;
         }
         const canDrag = (sortMode === 'custom');
@@ -4323,7 +4325,26 @@ if (!tl._audioUserSet) {
             </div>`;
         }).join('');
 
-        host.innerHTML = head + `<div class="sb-vh-grid">${rows}</div>`;
+        host.innerHTML = head + rootOpen + `<div class="sb-vh-grid">${rows}</div>` + rootClose;
+    },
+
+    // 整界面拖入：仅在拖拽的是文件（含 Files）时高亮 + 接收，避免拖出视频/排序拖拽误触发
+    _dragHasFiles(ev) {
+        const t = ev.dataTransfer && ev.dataTransfer.types;
+        if (!t) return false;
+        return Array.prototype.indexOf.call(t, 'Files') !== -1;
+    },
+    onImportVideoDragOver(ev) {
+        if (!this._dragHasFiles(ev)) return;   // 拖出/排序不带 Files → 不拦截
+        ev.preventDefault();
+        ev.dataTransfer.dropEffect = 'copy';
+        const zone = ev.currentTarget;
+        if (zone) zone.classList.add('drag-over');
+    },
+    onImportVideoDragLeave(ev) {
+        const zone = ev.currentTarget;
+        // 仅当真正离开容器（而非进入子元素）时移除高亮
+        if (zone && !zone.contains(ev.relatedTarget)) zone.classList.remove('drag-over');
     },
 
     // 按当前排序模式对列表排序（custom 用 order，缺省回退到原分镜组顺序）
