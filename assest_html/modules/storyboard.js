@@ -2933,8 +2933,8 @@ workflow: (Storage.getSettings().voiceSettings || {}).cloneWorkflow || 'vocpm',
     // 然后整体重新紧贴布局、音频跟随对应图像段的 start —— 实现「图音对齐、序号一致」。
     async _loadAudioDurations(alignInit) {
         const tl = this._tl; if (!tl) return;
-        // 有音频的图像段：在音频时长基础上前后各留 1 秒画面（图像段 = 音频 + 2s，音频在段内居中后移 1s）
-        const PAD_FRAMES = Math.round(1 * tl.fps);   // 前/后各 1 秒
+        // 有音频的图像段：在音频时长基础上前后各留 0.5 秒画面（图像段 = 音频 + 1s，音频在段内居中后移 0.5s）
+        const PAD_FRAMES = Math.round(0.5 * tl.fps);   // 前/后各 0.5 秒
         for (const a of tl.audioClips) {
             if (a.audioDurationFrames) continue;
             const m = a.audioId != null ? Storage.getMediaById(this.projectId, a.audioId) : null;
@@ -2945,7 +2945,7 @@ workflow: (Storage.getSettings().voiceSettings || {}).cloneWorkflow || 'vocpm',
                 if (alignInit) {
                     // 音频块时长 = 真实时长
                     a.length = a.audioDurationFrames;
-                    // 关联图像段时长 = 音频时长 + 前后各 1 秒（让画面在语音前后各多留 1 秒）
+                    // 关联图像段时长 = 音频时长 + 前后各 0.5 秒（让画面在语音前后各多留 0.5 秒）
                     const img = a.imgUid ? tl.imageClips.find(c => c.uid === a.imgUid) : null;
                     if (img) img.length = a.audioDurationFrames + PAD_FRAMES * 2;
                 }
@@ -3941,12 +3941,12 @@ if (!tl._audioUserSet) {
             if (need > (c.length || 0)) { c.length = need; aligned = true; }
         }
         if (aligned) {
-            const PAD = Math.round(1 * tl.fps);           // 前置 1 秒画面（与初始化对齐保持一致）
+            const PAD = Math.round(0.5 * tl.fps);           // 前置 0.5 秒画面（与初始化对齐保持一致）
             this._relayoutImages();                       // 图像轨重排：start 跟随新 length
             tl.audioClips.forEach(a => {                  // 音频跟随各自图像段 start 对齐
                 const img = a.imgUid ? tl.imageClips.find(x => x.uid === a.imgUid) : null;
                 if (img) {
-                    // 图像段比音频长（含前后各 1s padding）时，音频在段内后移 1s，保留语音前的留白
+                    // 图像段比音频长（含前后各 0.5s padding）时，音频在段内后移 0.5s，保留语音前的留白
                     const pad = (img.length > (a.audioDurationFrames || a.length || 0)) ? PAD : 0;
                     a.start = img.start + pad;
                 }
