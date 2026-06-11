@@ -602,6 +602,15 @@ input[type="checkbox"]{accent-color:var(--ac)}
 .sb-mark-btn.on{background:var(--grad-soft);border-color:var(--ac2);color:var(--ac2)}
 /* 禁用转场按钮激活态 */
 .sb-trans-toggle.on{background:var(--err,#fb7185);border-color:var(--err,#fb7185);color:#fff}
+/* 合成视频按钮：特殊渐变 + 发光 + 微动效，放在「智能生成分镜」之后作为主操作 */
+.sb-compose-btn{display:inline-flex;align-items:center;gap:0.4rem;padding:0.5rem 1rem;border:none;border-radius:10px;cursor:pointer;font-size:0.85rem;font-weight:700;color:#fff;letter-spacing:.3px;background:linear-gradient(120deg,#7c3aed 0%,#db2777 50%,#f59e0b 100%);background-size:200% 100%;box-shadow:0 4px 16px rgba(124,58,237,.4);transition:transform .15s ease,box-shadow .2s ease,background-position .5s ease;animation:sbComposeShimmer 4s linear infinite}
+.sb-compose-btn:hover{transform:translateY(-1px) scale(1.03);box-shadow:0 6px 22px rgba(219,39,119,.5)}
+.sb-compose-btn:active{transform:translateY(0) scale(.99)}
+.sb-compose-btn:disabled{opacity:.45;cursor:not-allowed;filter:grayscale(.5);box-shadow:none;animation:none;transform:none}
+.sb-compose-ic{font-size:1.05rem;animation:sbComposePulse 2.2s ease-in-out infinite}
+.sb-compose-btn:disabled .sb-compose-ic{animation:none}
+@keyframes sbComposeShimmer{0%{background-position:0% 50%}100%{background-position:200% 50%}}
+@keyframes sbComposePulse{0%,100%{transform:scale(1)}50%{transform:scale(1.18)}}
 .sb-pick-inline{display:inline-flex;align-items:center;gap:0.28rem;font-size:0.68rem;color:var(--t2);cursor:pointer;margin-left:0.4rem}
 /* 已标记 → 整行/整卡置灰 */
 .sb-marked{opacity:0.5;filter:grayscale(0.6)}

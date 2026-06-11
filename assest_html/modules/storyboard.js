@@ -57,10 +57,10 @@ const StoryboardModule = {
             <div class="sb-toolbar">
                 <div class="sb-toolbar-left">
                     ${genBtnHtml}
+                    <button class="sb-compose-btn" onclick="StoryboardModule.openTimeline()" ${groups.length ? '' : 'disabled'} title="进入时间轴合成视频：将已勾选的分镜按图像/音频双轨对齐后生成成片"><span class="sb-compose-ic">🎞️</span><span>合成视频</span></button>
                     <button class="btn-secondary" onclick="StoryboardModule.importGroupsFromFile()" title="上传分镜 JSON（含 person / 分镜 字段，与智能生成的格式一致），也可直接把 .json 拖到下方区域">📥 上传 JSON</button>
                     <input type="file" id="sbImportJson" accept="application/json,.json" style="display:none" onchange="StoryboardModule.onImportJsonFile(event)">
                     <button class="btn-secondary" onclick="StoryboardModule.exportContextJson()" title="导出剧本 / 人物 / 道具 / 场景为 JSON，供另一台机器导入或生成分镜复用">📤 导出素材</button>
-                    <button class="btn-secondary" onclick="StoryboardModule.openTimeline()" ${groups.length ? '' : 'disabled'}>🎞️ 合成视频（时间轴）</button>
                     <button class="btn-secondary sb-mark-global" onclick="StoryboardModule.markAllSelectedGlobal()" ${groups.length ? '' : 'disabled'} title="把所有组中当前『已勾选合成』的分镜一键标记为已处理（置灰并取消勾选）">✅ 标记已选</button>
                     <button class="btn-secondary sb-unsel-all" onclick="StoryboardModule.unselectAllGlobal()" ${groups.length ? '' : 'disabled'} title="取消所有组中当前『已勾选合成』的分镜（不改变已标记状态）">☐ 全部取消</button>
                     <button class="btn-secondary sb-trans-toggle ${Storage.getSettings().disableTransition ? 'on' : ''}" onclick="StoryboardModule.toggleDisableTransition()" title="禁用转场：合成视频时不再在相邻两段之间插入转场段（不拼接转场文本/时长）；未禁用时保持现状。">${Storage.getSettings().disableTransition ? '🚫 转场已禁用' : '🔀 禁用转场'}</button>
