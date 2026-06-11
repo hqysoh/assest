@@ -600,6 +600,8 @@ input[type="checkbox"]{accent-color:var(--ac)}
     border-radius:6px;font-size:0.72rem;padding:0.12rem 0.3rem;line-height:1.1;transition:all .15s;white-space:nowrap}
 .sb-mark-btn:hover{border-color:var(--ac);color:var(--ac)}
 .sb-mark-btn.on{background:var(--grad-soft);border-color:var(--ac2);color:var(--ac2)}
+/* 禁用转场按钮激活态 */
+.sb-trans-toggle.on{background:var(--err,#fb7185);border-color:var(--err,#fb7185);color:#fff}
 .sb-pick-inline{display:inline-flex;align-items:center;gap:0.28rem;font-size:0.68rem;color:var(--t2);cursor:pointer;margin-left:0.4rem}
 /* 已标记 → 整行/整卡置灰 */
 .sb-marked{opacity:0.5;filter:grayscale(0.6)}

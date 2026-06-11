@@ -63,6 +63,7 @@ const StoryboardModule = {
                     <button class="btn-secondary" onclick="StoryboardModule.openTimeline()" ${groups.length ? '' : 'disabled'}>🎞️ 合成视频（时间轴）</button>
                     <button class="btn-secondary sb-mark-global" onclick="StoryboardModule.markAllSelectedGlobal()" ${groups.length ? '' : 'disabled'} title="把所有组中当前『已勾选合成』的分镜一键标记为已处理（置灰并取消勾选）">✅ 标记已选</button>
                     <button class="btn-secondary sb-unsel-all" onclick="StoryboardModule.unselectAllGlobal()" ${groups.length ? '' : 'disabled'} title="取消所有组中当前『已勾选合成』的分镜（不改变已标记状态）">☐ 全部取消</button>
+                    <button class="btn-secondary sb-trans-toggle ${Storage.getSettings().disableTransition ? 'on' : ''}" onclick="StoryboardModule.toggleDisableTransition()" title="禁用转场：合成视频时不再在相邻两段之间插入转场段（不拼接转场文本/时长）；未禁用时保持现状。">${Storage.getSettings().disableTransition ? '🚫 转场已禁用' : '🔀 禁用转场'}</button>
                     <button class="btn-secondary btn-ghost-danger sb-del-all" onclick="StoryboardModule.delAllGroups()" ${groups.length ? '' : 'disabled'} title="一键删除当前项目下的全部分镜（四宫格 + 单分镜），此操作不可撤销">🗑️ 全部删除</button>
                     <label class="sb-clone-wf" title="语音克隆工作流：人物/分镜配音使用的 ComfyUI 工作流，VoxCPM 与 Qwen3-TD-TTS 音色风格略有差异，可按需切换">🎙️
                         <select onchange="StoryboardModule.setCloneWorkflow(this.value)">
@@ -1103,6 +1104,14 @@ workflow: (Storage.getSettings().voiceSettings || {}).cloneWorkflow || 'vocpm',
         if (!count) { App.showToast('当前没有已勾选『合成视频』的分镜', 'info'); return; }
         Storage.updateProject(this.projectId, { storyboardGroups: groups });
         App.showToast(`已取消 ${count} 个分镜的勾选`, 'success');
+        this.render(this.projectId);
+    },
+
+    // 禁用/启用转场：禁用后合成视频时不再拼接转场段（transition 文本/时长清零）；未禁用时保持现状
+    toggleDisableTransition() {
+        const next = !Storage.getSettings().disableTransition;
+        Storage.saveSettings({ disableTransition: next });
+        App.showToast(next ? '已禁用转场：合成时不再插入转场段' : '已恢复转场：合成时按各段设置插入转场段', next ? 'info' : 'success');
         this.render(this.projectId);
     },
 
@@ -3967,7 +3976,9 @@ if (!tl._audioUserSet) {
             const b64 = await this._urlToB64(Storage.mediaUrl(img.data));
             // 转场「附着」在图像段上：把该段的转场文字 + 时长一并带给后端，
             // 后端会自动在相邻两段之间插入「无图纯文本转场段」并顺延音频（不用手动摆位置）。
-            const tText = (c.shotTransition || '').trim();
+            // 全局「禁用转场」开启时：不拼接转场段（文本清空、时长置 0）；未禁用时保持现状。
+            const transOff = !!Storage.getSettings().disableTransition;
+            const tText = transOff ? '' : (c.shotTransition || '').trim();
             // 图像段最终 length：取「时间轴长度」与「关联音频时长」的较大值，双保险确保转场落在语音之后。
             const segLen = Math.max(clampLen(c), audLenByImg[c.uid] || 0);
             imageSegments.push({
