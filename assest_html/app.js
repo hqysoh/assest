@@ -222,6 +222,52 @@ const App = {
             overlay.onclick = (e) => { if (e.target === overlay) close(false); };
             overlay.classList.add('active');
         });
+    },
+
+    // 应用内输入弹窗（替代原生 prompt —— IDE 内嵌 WebView 会禁用原生 prompt）。
+    // 返回 Promise<string|null>：点确定 resolve(输入值)，取消/关闭 resolve(null)。
+    prompt(opts) {
+        opts = (typeof opts === 'string') ? { message: opts } : (opts || {});
+        const title = opts.title || '请输入';
+        const message = opts.message || '';
+        const okText = opts.okText || '确定';
+        const cancelText = opts.cancelText || '取消';
+        const defVal = opts.defaultValue != null ? String(opts.defaultValue) : '';
+        const ph = opts.placeholder || '';
+        const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        return new Promise(resolve => {
+            const overlay = document.getElementById('confirmOverlay') || (() => {
+                const o = document.createElement('div');
+                o.id = 'confirmOverlay';
+                o.className = 'modal-overlay';
+                o.innerHTML = '<div class="modal confirm-modal" id="confirmModal"></div>';
+                document.body.appendChild(o);
+                return o;
+            })();
+            const box = overlay.querySelector('#confirmModal');
+            const msgHtml = esc(message).replace(/\n/g, '<br>');
+            box.innerHTML =
+                '<div class="modal-header"><h2 class="modal-title">' + esc(title) + '</h2></div>' +
+                '<div class="modal-body">' +
+                (message ? '<p class="confirm-text">' + msgHtml + '</p>' : '') +
+                '<input type="text" class="form-input" id="promptInput" value="' + esc(defVal) + '" placeholder="' + esc(ph) + '" style="width:100%;margin-top:.4rem">' +
+                '</div>' +
+                '<div class="modal-footer">' +
+                '<button class="btn-secondary" id="promptCancel">' + esc(cancelText) + '</button>' +
+                '<button class="btn-primary" id="promptOk">' + esc(okText) + '</button>' +
+                '</div>';
+            const input = box.querySelector('#promptInput');
+            const close = (val) => { overlay.classList.remove('active'); resolve(val); };
+            box.querySelector('#promptOk').onclick = () => close(input.value);
+            box.querySelector('#promptCancel').onclick = () => close(null);
+            overlay.onclick = (e) => { if (e.target === overlay) close(null); };
+            input.onkeydown = (e) => {
+                if (e.key === 'Enter') { e.preventDefault(); close(input.value); }
+                else if (e.key === 'Escape') { e.preventDefault(); close(null); }
+            };
+            overlay.classList.add('active');
+            setTimeout(() => { input.focus(); input.select(); }, 30);
+        });
     }
 };
 

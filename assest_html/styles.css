@@ -626,7 +626,11 @@ input[type="checkbox"]{accent-color:var(--ac)}
 .sb-vh-card.is-watched:hover{opacity:.78}
 .sb-vh-card.is-watched .sb-vh-video{filter:grayscale(.4)}
 .sb-vh-tag{font-size:0.66rem;font-weight:600;color:#fff;background:var(--t3);border-radius:4px;padding:1px 5px;margin-left:0.3rem;vertical-align:middle}
+.sb-vh-tag-imp{background:var(--ac2,#7c3aed)}
 .sb-vh-markbtn.on{background:var(--grad-soft);border-color:var(--ac2);color:var(--ac2)}
+/* 视频历史：拖放导入区 */
+.sb-vh-drop{border:2px dashed var(--bd);border-radius:10px;padding:0.7rem 1rem;text-align:center;color:var(--t3);font-size:0.8rem;margin-bottom:0.9rem;transition:all .15s;cursor:default}
+.sb-vh-drop.drag-over{border-color:var(--ac);background:var(--grad-soft);color:var(--ac2)}
 .sb-pick-inline{display:inline-flex;align-items:center;gap:0.28rem;font-size:0.68rem;color:var(--t2);cursor:pointer;margin-left:0.4rem}
 /* 已标记 → 整行/整卡置灰 */
 .sb-marked{opacity:0.5;filter:grayscale(0.6)}

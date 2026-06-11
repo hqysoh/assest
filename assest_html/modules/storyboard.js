@@ -4261,8 +4261,8 @@ if (!tl._audioUserSet) {
             return;
         }
         const rows = list.map(v => {
-            const name = `${v.baseName}(${v.seq})`;
-            const fname = `${v.baseName}_${v.seq}.mp4`.replace(/[\\/:*?"<>|]/g, '_');
+            const name = this._vhDisplayName(v);
+            const fname = `${name}.mp4`.replace(/[\\/:*?"<>|]/g, '_');
             const url = this._videoFileUrl(v.file);
             const missing = !v.file;
             const drag = (!missing && url) ? App.videoDragHandle(url, fname, '拖到剪辑软件') : '';
@@ -4271,16 +4271,18 @@ if (!tl._audioUserSet) {
                 : `<div class="sb-vh-missing">⚠️ 未索引到视频文件（可能 ComfyUI 输出已清理或非同机）</div>`;
             const when = v.createdAt ? new Date(v.createdAt).toLocaleString() : '';
             const watched = !!v.watched;
+            const tag = v.imported ? ' <span class="sb-vh-tag sb-vh-tag-imp">导入</span>' : '';
             return `<div class="sb-vh-card ${watched ? 'is-watched' : ''}">
                 <div class="sb-vh-thumb">${videoEl}</div>
                 <div class="sb-vh-meta">
-                    <div class="sb-vh-name" title="${this.esc(v.file || '')}">${this.esc(name)}${watched ? ' <span class="sb-vh-tag">已看</span>' : ''}</div>
-                    <div class="sb-vh-sub">${v.frames || 0} 帧 · ${when}</div>
+                    <div class="sb-vh-name" title="${this.esc(v.file || '')}">${this.esc(name)}${tag}${watched ? ' <span class="sb-vh-tag">已看</span>' : ''}</div>
+                    <div class="sb-vh-sub">${v.frames ? v.frames + ' 帧 · ' : ''}${when}</div>
                     <div class="sb-vh-acts">
                         ${drag}
+                        <button class="btn-ghost btn-tiny" onclick="StoryboardModule.renameVideoHistory('${v.id}')" title="重命名：自定义该视频的显示名（同时影响拖出/下载的文件名）">✏️ 重命名</button>
                         ${(!missing && url) ? `<a class="btn-ghost btn-tiny" href="${url}" download="${fname}">⬇ 下载</a>` : ''}
                         <button class="btn-ghost btn-tiny sb-vh-markbtn ${watched ? 'on' : ''}" onclick="StoryboardModule.toggleVideoWatched('${v.id}')" title="标记为已看：点击后本卡片置灰，便于区分哪些已播放（可再次点击取消）">${watched ? '↺ 标记已看' : '✓ 标记已看'}</button>
-                        <button class="btn-ghost btn-tiny btn-ghost-danger" onclick="StoryboardModule.delVideoHistory('${v.id}')" title="从历史中删除（仅移除索引记录，不会删除 ComfyUI 生成目录里的原视频文件）">🗑️ 删除</button>
+                        <button class="btn-ghost btn-tiny btn-ghost-danger" onclick="StoryboardModule.delVideoHistory('${v.id}')" title="从历史中删除（仅移除索引记录，不会删除磁盘上的原视频文件）">🗑️ 删除</button>
                     </div>
                 </div>
             </div>`;
@@ -4288,10 +4290,25 @@ if (!tl._audioUserSet) {
 
         host.innerHTML = `
             <div class="sb-vh-head">
-                <span class="sb-count">共 ${list.length} 个合成视频</span>
-                <span class="sb-vh-hint">命名规则：分镜「起始组-结束组」(同组合内的第几次)；拖动「拖到剪辑软件」即可导出。索引到生成目录，不复制、省空间。</span>
+                <span class="sb-count">共 ${list.length} 个视频</span>
+                <button class="btn-secondary btn-tiny" onclick="StoryboardModule.pickImportVideo()" title="选择本地视频导入：后端落盘一次后索引该路径（之后不再复制），可播放/重命名/拖到剪辑软件">📥 导入视频</button>
+                <input type="file" id="vhImportInput" accept="video/*,.mp4,.webm,.mov,.mkv,.avi,.gif" multiple style="display:none" onchange="StoryboardModule.onImportVideoInput(event)">
+                <span class="sb-vh-hint">合成视频自动命名「分镜起-止(第几次)」；可重命名。拖动「拖到剪辑软件」导出。索引到生成/导入目录，不重复复制、省空间。</span>
+            </div>
+            <div class="sb-vh-drop" id="vhDropZone"
+                ondragover="event.preventDefault();this.classList.add('drag-over')"
+                ondragleave="this.classList.remove('drag-over')"
+                ondrop="StoryboardModule.onImportVideoDrop(event)">
+                ⬇️ 把视频文件拖到这里导入（自动索引，不复制原文件之外的多余副本）
             </div>
             <div class="sb-vh-grid">${rows}</div>`;
+    },
+
+    // 显示名：用户重命名优先；否则合成视频用「分镜X-Y(N)」，导入视频用原文件名（去扩展名）
+    _vhDisplayName(v) {
+        if (v.displayName && v.displayName.trim()) return v.displayName.trim();
+        if (v.imported) return (v.rawName || '导入视频').replace(/\.[^.]+$/, '');
+        return `${v.baseName}(${v.seq})`;
     },
 
     delVideoHistory(id) {
@@ -4315,6 +4332,104 @@ if (!tl._audioUserSet) {
         if (typeof ProjectModule !== 'undefined' && ProjectModule.currentTab === 'videos') {
             this.renderVideoHistory(this.projectId);
         }
+    },
+
+    // 重命名：自定义显示名（持久化），同时影响拖出/下载文件名；留空恢复默认命名
+    async renameVideoHistory(id) {
+        const p = Storage.getProject(this.projectId);
+        const list = (p.storyboardVideos || []).slice();
+        const v = list.find(x => x.id === id);
+        if (!v) return;
+        const cur = this._vhDisplayName(v);
+        const next = await App.prompt({
+            title: '重命名视频',
+            message: '自定义该视频的显示名（同时作为拖出/下载的文件名）。留空可恢复默认命名。',
+            defaultValue: cur,
+            placeholder: cur,
+        });
+        if (next === null) return;   // 取消
+        v.displayName = (next || '').trim();   // 空串 → 恢复默认
+        Storage.updateProject(this.projectId, { storyboardVideos: list });
+        App.showToast(v.displayName ? '已重命名' : '已恢复默认命名', 'success');
+        if (typeof ProjectModule !== 'undefined' && ProjectModule.currentTab === 'videos') {
+            this.renderVideoHistory(this.projectId);
+        }
+    },
+
+    // 点「导入视频」按钮 → 触发文件选择
+    pickImportVideo() {
+        const inp = document.getElementById('vhImportInput');
+        if (inp) inp.click();
+    },
+
+    // 文件选择导入
+    async onImportVideoInput(ev) {
+        const files = Array.from((ev.target && ev.target.files) || []);
+        if (ev.target) ev.target.value = '';   // 允许重复选同一文件
+        await this._importVideoFiles(files);
+    },
+
+    // 拖放导入
+    async onImportVideoDrop(ev) {
+        ev.preventDefault();
+        const zone = document.getElementById('vhDropZone');
+        if (zone) zone.classList.remove('drag-over');
+        const files = Array.from((ev.dataTransfer && ev.dataTransfer.files) || [])
+            .filter(f => /^video\//.test(f.type) || /\.(mp4|webm|mov|mkv|avi|gif)$/i.test(f.name));
+        if (!files.length) { App.showToast('请拖入视频文件（mp4/webm/mov/mkv/avi/gif）', 'error'); return; }
+        await this._importVideoFiles(files);
+    },
+
+    // 把选中的本地视频文件上传到后端落盘一次，记录返回的绝对路径作为索引（不再二次复制）
+    async _importVideoFiles(files) {
+        if (!files || !files.length) return;
+        let ok = 0;
+        for (const f of files) {
+            try {
+                App.showToast(`正在导入「${f.name}」…`, 'info');
+                const b64 = await this._fileToB64(f);
+                const r = await API.post('/api/import_video', { data: b64, filename: f.name });
+                if (!r || !r.success || !r.video_file) throw new Error((r && r.error) || '导入失败');
+                this._addImportedVideo({ file: r.video_file, rawName: f.name });
+                ok++;
+            } catch (e) {
+                App.showToast(`导入「${f.name}」失败：${e.message || e}`, 'error');
+            }
+        }
+        if (ok) App.showToast(`已导入 ${ok} 个视频（已自动索引）`, 'success');
+        if (typeof ProjectModule !== 'undefined' && ProjectModule.currentTab === 'videos') {
+            this.renderVideoHistory(this.projectId);
+        }
+    },
+
+    // 把 File 读成纯 base64（不含 data: 前缀）
+    _fileToB64(file) {
+        return new Promise((resolve, reject) => {
+            const fr = new FileReader();
+            fr.onload = () => {
+                const s = String(fr.result || '');
+                resolve(s.includes(',') ? s.split(',', 2)[1] : s);
+            };
+            fr.onerror = reject;
+            fr.readAsDataURL(file);
+        });
+    },
+
+    // 导入视频入历史：标记 imported=true，默认显示名取原文件名（可重命名）
+    _addImportedVideo({ file, rawName }) {
+        const p = Storage.getProject(this.projectId);
+        const list = Array.isArray(p.storyboardVideos) ? p.storyboardVideos.slice() : [];
+        list.push({
+            id: Storage._uid(),
+            file: file || '',
+            rawName: rawName || '',
+            frames: 0,
+            imported: true,
+            groupFrom: 9999, groupTo: 9999,   // 导入项排在合成项之后
+            baseName: '导入', seq: list.filter(v => v.imported).length,
+            createdAt: Date.now(),
+        });
+        Storage.updateProject(this.projectId, { storyboardVideos: list });
     },
 
     // 打开弹窗时恢复：若有进行中的视频任务，继续计时 + 轮询；并补渲染失败横幅

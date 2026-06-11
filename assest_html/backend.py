@@ -20,6 +20,9 @@ TTS_WORKFLOW_PATH = os.path.join(os.path.dirname(__file__), "..", "workflow-api"
 BASE_DIR = os.path.dirname(__file__)
 DB_FILE = os.path.join(BASE_DIR, "data.db")
 MEDIA_DIR = os.path.join(BASE_DIR, "media")
+# 视频历史「拖放/上传导入」落盘目录：浏览器拿不到本地绝对路径，故由后端落盘一次到此目录，
+# 之后视频历史只索引该绝对路径（不再二次复制），与 ComfyUI 生成的视频共用 /api/video_file 播放/拖出。
+IMPORT_DIR = os.path.join(BASE_DIR, "imports")
 COMFYUI_BASE = None
 
 tts_queue = queue.Queue()
@@ -601,6 +604,7 @@ def get_db():
 def init_db():
     os.makedirs(BASE_DIR, exist_ok=True)
     os.makedirs(MEDIA_DIR, exist_ok=True)
+    os.makedirs(IMPORT_DIR, exist_ok=True)
     conn = get_db()
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS settings (
@@ -1688,6 +1692,7 @@ class Handler(BaseHTTPRequestHandler):
             '/api/storyboard/video': self.storyboard_video,            # 异步：导演台视频生成
             '/api/sb_task': self.sb_task_status,                       # 统一查询分镜异步任务
             '/api/sb_cancel': self.sb_task_cancel,                      # 打断分镜异步任务（真实中断 ComfyUI）
+            '/api/import_video': self.import_video_handler,            # 视频历史：拖放/上传导入，落盘一次后索引绝对路径
         }
         handler = routes.get(self.path)
         if handler: handler()
@@ -1776,6 +1781,35 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({'success': False, 'error': '缺少参数'}, 500); return
             rel_path = save_media_file(pid, media_type, base64_data)
             self.send_json({'success': True, 'path': rel_path})
+        except Exception as e:
+            import traceback; traceback.print_exc()
+            self.send_json({'success': False, 'error': str(e)}, 500)
+
+    def import_video_handler(self):
+        """视频历史「拖放/上传导入」：浏览器拿不到本地绝对路径，故把文件内容（base64）落盘到 IMPORT_DIR，
+        返回该文件的绝对路径，前端以此路径索引（不再二次复制），与生成的视频共用 /api/video_file 播放/拖出。"""
+        try:
+            d = self.read_body()
+            b64 = d.get('data', '') or ''
+            name = (d.get('filename', '') or 'import.mp4').strip()
+            if ',' in b64 and b64[:5].lower() == 'data:':
+                b64 = b64.split(',', 1)[1]
+            elif b64.startswith('data:'):
+                b64 = b64.split(',', 1)[1] if ',' in b64 else ''
+            if not b64:
+                self.send_json({'success': False, 'error': '缺少视频数据'}, 400); return
+            ext = os.path.splitext(name)[1].lower()
+            allow = {'.mp4', '.webm', '.mov', '.mkv', '.avi', '.gif'}
+            if ext not in allow:
+                ext = '.mp4'
+            os.makedirs(IMPORT_DIR, exist_ok=True)
+            # 安全文件名 + 时间戳，避免覆盖
+            safe = re.sub(r'[\\/:*?"<>|]', '_', os.path.splitext(name)[0])[:60] or 'import'
+            fname = f"{safe}_{int(time.time()*1000)}{ext}"
+            fpath = os.path.join(IMPORT_DIR, fname)
+            with open(fpath, 'wb') as f:
+                f.write(base64.b64decode(b64))
+            self.send_json({'success': True, 'video_file': fpath, 'video_name': fname})
         except Exception as e:
             import traceback; traceback.print_exc()
             self.send_json({'success': False, 'error': str(e)}, 500)
