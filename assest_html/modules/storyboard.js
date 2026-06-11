@@ -1576,18 +1576,30 @@ workflow: (Storage.getSettings().voiceSettings || {}).cloneWorkflow || 'vocpm',
                     const prev = !g.single ? this._prevGroupLastImage(g) : null;
                     if (!prev) return '';
                     const disabled = !!g.prevLinkDisabled;
-                    const prevInfo = prev.url
-                        ? `<span style="color:var(--ac);font-weight:600">✅ 第${prev.groupNo}组末帧已就绪</span>`
-                        : `<span style="color:var(--err);font-weight:600">⚠️ 第${prev.groupNo}组尚无末帧图</span>`;
+                    const prevStatus = prev.url
+                        ? `✅ 第${prev.groupNo}组末帧就绪`
+                        : `⚠️ 第${prev.groupNo}组尚无末帧`;
+                    // 取上一组最后一个面板的 localPrompt（用于展示给用户参考）
+                    let lastLocal = '';
+                    if (prev.groupNo) {
+                        const groups = (Storage.getProject(this.projectId).storyboardGroups || []);
+                        const pg = groups[prev.groupNo - 1];
+                        if (pg) {
+                            if (pg.single) { lastLocal = (pg.globalPrompt || pg.prompt || '').slice(0, 80); }
+                            else { const lp = (pg.localPrompts || []); lastLocal = (lp[3] || lp[lp.length - 1] || '').slice(0, 90); }
+                        }
+                    }
                     return `
                     <div class="form-group sb-fg-prev0 ${disabled ? 'sb-fg-prev0-disabled' : ''}" id="fgPrevLinkArea">
-                        <label class="form-label">@图0 · 上一镜末帧衔接 ${disabled ? '<span style="color:var(--t3);font-size:0.72rem;font-weight:400;margin-left:0.3rem">（已移除）</span>' : ''}</label>
-                        <div style="display:flex;gap:0.4rem;align-items:flex-start">
-                            <div style="flex:1;min-width:0">${prevInfo}</div>
-                            ${prev.url ? `<img src="${prev.url}" style="width:80px;height:50px;object-fit:cover;border-radius:6px;border:1px solid var(--bd)">` : ''}
+                        <div class="sb-fg-prev0-head">
+                            <span class="form-label">@图0 · 上一镜末帧</span>
+                            <span class="sb-fg-prev0-st">${prevStatus}</span>
+                            ${disabled ? '<span class="sb-fg-prev0-off">（已移除）</span>' : ''}
                         </div>
-                        <textarea class="form-textarea sb-fg-prev0-ta" id="fgPrevLinkNote" style="min-height:52px;${disabled ? 'opacity:.5' : ''}"
-                            placeholder="衔接要求（可选）：@图0 是上一组最后一个画面。请让本组第 1 格从该画面自然延续（人物/场景/光线/色调/镜头视角连贯），使宫格之间过渡平滑流畅、无跳变。"
+                        ${lastLocal ? `<div class="sb-fg-prev0-lp"><b>上一组面板4 提示词：</b><span>${this.esc(lastLocal)}</span></div>` : ''}
+                        <textarea class="form-textarea sb-fg-prev0-ta" id="fgPrevLinkNote"
+                            style="min-height:38px;color:var(--t1);font-size:0.82rem;line-height:1.45;resize:vertical;${disabled ? 'opacity:.4;pointer-events:none;background:var(--bg2);color:var(--t3)' : ''}"
+                            placeholder="衔接要求（可编辑）：根据下方四宫格提示词自行决定是否参考 @图0，让本组第 1 格与上一镜末帧自然延续过渡。"
                             onchange="StoryboardModule._saveFgPrevLinkNote('${gid}', this.value)"
                         >${this.esc(g.prevLinkNote || '')}</textarea>
                     </div>`;

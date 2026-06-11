@@ -670,12 +670,16 @@ input[type="checkbox"]{accent-color:var(--ac)}
 .sb-fg-ref-cell.is-extra{border-color:rgba(99,102,241,.4);background:rgba(99,102,241,.06)}
 .sb-fg-ref-cell.is-prev{border-color:rgba(52,211,153,.5);background:rgba(52,211,153,.08)}
 .sb-fg-ref-cell.is-prev.is-miss{border-color:rgba(251,113,133,.45);background:rgba(251,113,133,.08)}
-/* @图0 上一镜末帧衔接说明区域 */
-.sb-fg-prev0{border:1px solid var(--bd);border-radius:10px;padding:0.55rem;background:var(--bg3);transition:all .18s}
+/* @图0 上一镜末帧衔接说明区域（紧凑版） */
+.sb-fg-prev0{border:1px solid var(--bd);border-radius:8px;padding:0.4rem 0.6rem;background:var(--bg3);transition:all .18s;font-size:0}
 .sb-fg-prev0:hover{border-color:var(--ac)}
-.sb-fg-prev0-disabled{opacity:.45;pointer-events:none;background:var(--bg2);border-color:var(--bd)}
-.sb-fg-prev0-disabled .form-label{color:var(--t3)}
-.sb-fg-prev0-ta{font-size:0.8rem;line-height:1.4;resize:vertical}
+.sb-fg-prev0-disabled{opacity:.35;pointer-events:none;background:var(--bg2);border-color:var(--bd);filter:grayscale(1)}
+.sb-fg-prev0-disabled .form-label,.sb-fg-prev0-st,.sb-fg-prev0-off{color:var(--t3)!important}
+.sb-fg-prev0-head{display:flex;align-items:center;gap:0.35rem;margin-bottom:2px;flex-wrap:wrap}
+.sb-fg-prev0-st{font-size:0.75rem;font-weight:600;color:var(--ac)}
+.sb-fg-prev0-off{font-size:0.72rem;color:var(--t3);font-weight:400;margin-left:0.25rem;font-style:italic}
+.sb-fg-prev0-lp{font-size:0.7rem;color:var(--t2);background:var(--bg2);border-radius:5px;padding:3px 6px;margin-top:2px;border-left:2px solid var(--bd);line-height:1.35;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;max-height:4.8em}
+.sb-fg-prev0-ta{font-size:0.82rem;line-height:1.45;resize:vertical;color:var(--t1)}
 /* 参考图单元的操作按钮区（选图/上传/更换/清除/删除） */
 .sb-fg-ref-acts{display:flex;flex-wrap:wrap;gap:0.25rem;justify-content:center;margin-top:0.1rem}
 .sb-fg-ref-acts .btn-tiny{padding:0.12rem 0.4rem;font-size:0.62rem}
