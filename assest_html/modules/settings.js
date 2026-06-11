@@ -68,14 +68,6 @@ const SettingsModule = {
         <div class="settings-section">
             <h2 class="settings-section-title">🔊 语音生成</h2>
             <div class="form-group">
-                <label class="form-label">语音克隆工作流</label>
-                <select class="form-input" id="voiceCloneWorkflow" onchange="SettingsModule.autoSaveCloneWorkflow(this.value)">
-                    <option value="vocpm" ${(voice.cloneWorkflow || 'vocpm') === 'vocpm' ? 'selected' : ''}>VoxCPM（vocpm，默认）</option>
-                    <option value="qwen3" ${voice.cloneWorkflow === 'qwen3' ? 'selected' : ''}>Qwen3-TD-TTS</option>
-                </select>
-                <p class="form-hint">人物 / 分镜的「语音克隆」使用的 ComfyUI 工作流。两者都基于参考音色 + 台词文本克隆，效果与音色风格略有差异，可按需切换。</p>
-            </div>
-            <div class="form-group">
                 <label class="form-label">默认朗读文本模板</label>
                 <input class="form-input" id="voiceTemplate" value="${this.esc(voice.textTemplate || '我是{name}，这是我的音色，很高兴认识你')}" placeholder="我是{name}，这是我的音色"
                     onchange="SettingsModule.autoSaveVoice(this.value)">

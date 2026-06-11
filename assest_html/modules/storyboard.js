@@ -63,6 +63,12 @@ const StoryboardModule = {
                     <button class="btn-secondary" onclick="StoryboardModule.openTimeline()" ${groups.length ? '' : 'disabled'}>🎞️ 合成视频（时间轴）</button>
                     <button class="btn-secondary sb-mark-global" onclick="StoryboardModule.markAllSelectedGlobal()" ${groups.length ? '' : 'disabled'} title="把所有组中当前『已勾选合成』的分镜一键标记为已处理（置灰并取消勾选）">✅ 标记已选</button>
                     <button class="btn-secondary btn-ghost-danger sb-del-all" onclick="StoryboardModule.delAllGroups()" ${groups.length ? '' : 'disabled'} title="一键删除当前项目下的全部分镜（四宫格 + 单分镜），此操作不可撤销">🗑️ 全部删除</button>
+                    <label class="sb-clone-wf" title="语音克隆工作流：人物/分镜配音使用的 ComfyUI 工作流，VoxCPM 与 Qwen3-TD-TTS 音色风格略有差异，可按需切换">🎙️
+                        <select onchange="StoryboardModule.setCloneWorkflow(this.value)">
+                            <option value="vocpm" ${((Storage.getSettings().voiceSettings || {}).cloneWorkflow || 'vocpm') === 'vocpm' ? 'selected' : ''}>VoxCPM</option>
+                            <option value="qwen3" ${(Storage.getSettings().voiceSettings || {}).cloneWorkflow === 'qwen3' ? 'selected' : ''}>Qwen3-TD-TTS</option>
+                        </select>
+                    </label>
                 </div>
                 <div class="sb-toolbar-right">
                     <span class="sb-count">${groups.length} 组四宫格 · ${groups.length * 4} 个分镜</span>
@@ -779,7 +785,7 @@ const StoryboardModule = {
                     ${refUrl ? `<audio controls preload="none" src="${refUrl}"></audio>` : '<span class="sb-audio-ref-miss">尚未选择参考音色</span>'}
                     <button class="btn-ghost btn-tiny" onclick="StoryboardModule.pickRefAudio('${gid}')">选参考音色</button>
                 </div>
-                ${curUrl ? `<div class="sb-audio-ref"><span class="sb-audio-ref-label">当前配音</span><audio controls preload="none" src="${curUrl}"></audio></div>` : ''}
+                ${curUrl ? `<div class="sb-audio-ref"><span class="sb-audio-ref-label">当前配音</span><audio controls preload="none" src="${curUrl}"></audio>${App.audioDragHandle(curUrl, `分镜配音_${gid}.${((curAud && curAud.mime) || '').includes('mpeg') ? 'mp3' : ((curAud && curAud.mime) || '').includes('flac') ? 'flac' : 'wav'}`, '拖出')}</div>` : ''}
                 <div id="ssResult" style="margin-top:0.6rem"></div>
             </div>
             <div class="modal-footer">
@@ -1274,6 +1280,14 @@ workflow: (Storage.getSettings().voiceSettings || {}).cloneWorkflow || 'vocpm',
         if (out) App.closeModal();
         App.showToast('⏹ 已停止本次生成', 'info');
         if (this.projectId) this.render(this.projectId);
+    },
+
+    // 🎙️ 语音克隆工作流选择：保存到全局设置，人物/分镜配音时读取
+    setCloneWorkflow(wf) {
+        const s = Storage.getSettings();
+        const cloneWorkflow = (wf === 'qwen3') ? 'qwen3' : 'vocpm';
+        Storage.saveSettings({ voiceSettings: { ...(s.voiceSettings || {}), cloneWorkflow } });
+        if (window.App && App.showToast) App.showToast(`语音克隆工作流已切换为 ${cloneWorkflow === 'qwen3' ? 'Qwen3-TD-TTS' : 'VoxCPM'}`);
     },
 
     // 📥 上传 JSON：触发隐藏的文件选择框
@@ -2324,7 +2338,7 @@ workflow: (Storage.getSettings().voiceSettings || {}).cloneWorkflow || 'vocpm',
                             ? `<span class="sb-audio-ref-miss">⚠️ 该人物尚无音色，请先到人物页生成音频</span>`
                             : `<span class="sb-audio-ref-miss">请先选择说话人</span>`)}
                 </div>
-                ${curUrl ? `<div class="sb-audio-ref"><span class="sb-audio-ref-label">当前配音</span><audio controls preload="none" src="${curUrl}"></audio></div>` : ''}
+                ${curUrl ? `<div class="sb-audio-ref"><span class="sb-audio-ref-label">当前配音</span><audio controls preload="none" src="${curUrl}"></audio>${App.audioDragHandle(curUrl, `分镜配音_${gid}_${panelIdx}.${((curAud && curAud.mime) || '').includes('mpeg') ? 'mp3' : ((curAud && curAud.mime) || '').includes('flac') ? 'flac' : 'wav'}`, '拖出')}</div>` : ''}
                 <div id="saResult" style="margin-top:0.6rem"></div>
                 ${histList.length >= 1 ? `
                     <details class="sb-audio-hist-block" open>
@@ -2351,6 +2365,7 @@ workflow: (Storage.getSettings().voiceSettings || {}).cloneWorkflow || 'vocpm',
                 <audio id="sbHa_${a.id}" src="${Storage.mediaUrl(a.data)}" style="display:none"></audio>
                 <div class="audio-history-actions">
                     <button class="btn-play audio-play-btn" id="sbHp_${a.id}" onclick="StoryboardModule.playHistAudio('${a.id}')">▶</button>
+                    ${App.audioDragHandle(Storage.mediaUrl(a.data), `分镜配音_${gid}_${panelIdx}_${idx + 1}.${((a.mime) || '').includes('mpeg') ? 'mp3' : ((a.mime) || '').includes('flac') ? 'flac' : 'wav'}`, '拖出')}
                     <button class="gallery-select-btn" title="设为当前" onclick="StoryboardModule.selectPanelAudio('${gid}',${panelIdx},'${a.id}')">✓</button>
                     <button class="gallery-delete-btn" title="删除" onclick="StoryboardModule.deletePanelAudio('${gid}',${panelIdx},'${a.id}')">×</button>
                 </div>
