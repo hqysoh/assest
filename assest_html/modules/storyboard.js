@@ -4266,7 +4266,6 @@ if (!tl._audioUserSet) {
                         <option value="name" ${sortMode === 'name' ? 'selected' : ''}>名称</option>
                     </select>
                 </label>
-                <span class="sb-vh-hint">${sortMode === 'custom' ? '拖动卡片左上「⠿」把手可调整顺序；' : '切到「手动拖拽」可自定义顺序；'}鼠标按住视频画面直接拖到剪辑软件即可导出。把本地视频文件拖到本界面任意位置即可导入。</span>
             </div>`;
 
         // 整个历史 tab 作为拖放导入区：拖入文件时整界面高亮（拖出/排序不带 Files，不会误触发）
