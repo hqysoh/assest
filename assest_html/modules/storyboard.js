@@ -2982,6 +2982,24 @@ workflow: (Storage.getSettings().voiceSettings || {}).cloneWorkflow || 'vocpm',
             cursor += len;
         });
 
+        // 自动追加「定格尾段」：把最后一张图原样复制一份接在末尾（空提示词、无转场、无音频）。
+        // 作用：给视频结尾一个图像锚点，避免 LTX 在无约束的结尾区自由发挥（漂出工作流示例 F1 画面）。
+        // 它是时间轴上一个真实、可见、可拖动、可删除的块——不需要就直接在预览区删掉它。
+        if (imageClips.length) {
+            const lastClip = imageClips[imageClips.length - 1];
+            const tailLen = Math.round(this.FPS * 1.0);   // 默认 1 秒
+            imageClips.push({
+                uid: Storage._uid(),
+                imageId: lastClip.imageId,     // 复用最后一镜的图
+                prompt: '',                    // 不带 local 提示词
+                dialogue: {}, transition: 'cut',
+                shotTransition: '', transitionDur: 0,
+                start: cursor, length: tailLen,
+                isTail: true,                  // 标记：定格尾段（UI 可特殊标识）
+            });
+            cursor += tailLen;
+        }
+
         // 参与合成的分镜组号范围（用于视频历史命名「分镜X-Y」）：取 segments 涉及组在 all 中的序号
         const involvedIdx = [];
         segments.forEach(s => {
@@ -3260,8 +3278,8 @@ workflow: (Storage.getSettings().voiceSettings || {}).cloneWorkflow || 'vocpm',
                 <div class="sb-dir-handle l" data-h="l" title="拖动改时长（后续图片跟随移动）"></div>
                 <div class="sb-dir-clip-body" title="点击：在下方编辑提示词 / 拖动换位 / 拉两侧改时长">
                     ${url ? '' : '<span class="sb-dir-noimg">无图</span>'}
-                    <span class="sb-dir-clip-meta">#${i + 1} · ${secsLabel}</span>
-                    ${promptText ? `<span class="sb-dir-clip-prompt" title="${promptText}">${promptText}</span>` : ''}
+                    <span class="sb-dir-clip-meta">${c.isTail ? '🔚 定格' : '#' + (i + 1)} · ${secsLabel}</span>
+                    ${c.isTail ? '<span class="sb-dir-clip-prompt" title="自动追加的定格尾段：复制最后一镜的图，给结尾一个图像锚点防止漂移；不需要可点 × 删除">定格尾段·可删</span>' : (promptText ? `<span class="sb-dir-clip-prompt" title="${promptText}">${promptText}</span>` : '')}
                     <button class="sb-dir-clip-x" title="删除" onmousedown="event.stopPropagation()" onclick="StoryboardModule.tlDelClip('img','${c.uid}')">×</button>
                 </div>
                 <div class="sb-dir-handle r" data-h="r" title="拖动改时长（后续图片跟随移动）"></div>
@@ -4093,6 +4111,7 @@ const tl = this._tl;
                 max_guide_strength: parseFloat(tl.guideStrength || '1.00'),   // 每段引导强度上限
                 use_custom_audio: (tl.useCustomAudio !== false) && audioSegments.length > 0,
                 fps: tl.fps,
+                tail_pad_sec: 0,   // 关闭后端自动尾段：尾段已由前端时间轴显式追加为可见可删的块，避免重复
                 workflow: tl.workflow || 'singularity',   // 导演台工作流：singularity(默认) | director
             });
             if (!submit.success || !submit.task_id) throw new Error(submit.error || '提交失败');
