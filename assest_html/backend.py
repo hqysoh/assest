@@ -1289,7 +1289,11 @@ def run_director_singularity_sync(params, task_id=None):
             })
             cursor += trans_frames
 
-    total_frames = max(int(params.get('total_frames') or 0), cursor)
+    # total_length 必须精确等于 segments 铺满的实际帧数（cursor），不能用前端传的 total_frames 撑大。
+    # 否则末尾 [cursor, total_frames) 是「无任何图像段覆盖」的空白区间，LTX 采样器会在该区间自由发挥，
+    # 表现为视频结尾出现一小段「与最后一镜无关/类似工作流默认提示词」的漂移画面（用户反馈的 bug）。
+    # 前端的 total_frames 仅用于「时间轴超出截断」，不应反向把时间轴长度撑长。
+    total_frames = cursor if cursor > 0 else max(int(params.get('total_frames') or 0), 1)
 
     timeline_obj = {
         'tracks': [
