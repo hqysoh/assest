@@ -4320,6 +4320,7 @@ const tl = this._tl;
         const head = `
             <div class="sb-vh-head">
                 <span class="sb-count">共 ${list.length} 个视频</span>
+                <button class="btn-secondary btn-tiny" onclick="StoryboardModule.refreshVideoHistory()" title="刷新：重新读取最新历史记录并重新校验视频文件是否可用（合成完成或在别处变更后可手动刷新）">🔄 刷新</button>
                 <button class="btn-secondary btn-tiny" onclick="StoryboardModule.pickImportVideo()" title="选择本地视频导入：后端落盘一次后索引该路径（之后不再复制），可播放/重命名/拖到剪辑软件">📥 导入视频</button>
                 <input type="file" id="vhImportInput" accept="video/*,.mp4,.webm,.mov,.mkv,.avi,.gif" multiple style="display:none" onchange="StoryboardModule.onImportVideoInput(event)">
                 <label class="sb-vh-sortwrap" title="排序方式：手动拖拽 / 按生成时间 / 按名称">排序
@@ -4488,6 +4489,12 @@ const tl = this._tl;
         if (v.imported) return '导入视频';
         // 兜底：无原始文件名时才用「分镜X-Y(N)」
         return `${v.baseName}(${v.seq})`;
+    },
+
+    // 手动刷新视频历史：重新从最新工程读取记录并重渲染（重新校验文件可用性、刷新缩略/排序）
+    refreshVideoHistory() {
+        this.renderVideoHistory(this.projectId);
+        App.showToast('已刷新视频历史', 'success');
     },
 
     delVideoHistory(id) {
