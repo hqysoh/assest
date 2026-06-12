@@ -3977,6 +3977,10 @@ const tl = this._tl;
             if (far > 0) tl.totalFrames = far;            // 总长扩到容纳拉伸后的图像轨
         }
 
+        // 保险：把总长收敛为「图像轨实际最远端」，避免末尾留出无图引导的空白帧
+        // （否则 LTX 会在该无主区间按工作流默认模板手感自由衍生，导致结尾出现无关画面，如 F1 模板）。
+        const imgFar = tl.imageClips.reduce((mx, c) => Math.max(mx, c.start + c.length), 0);
+        if (imgFar > 0) tl.totalFrames = imgFar;
         // 仅纳入落在总时长范围内（start < totalFrames）的块；length 截断到不超过总长
         const total = tl.totalFrames;
         const clampLen = (c) => Math.max(1, Math.min(c.length, total - c.start));

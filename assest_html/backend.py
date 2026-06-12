@@ -1236,8 +1236,14 @@ def run_director_singularity_sync(params, task_id=None):
     main_segments = []
     cursor = 0
     uploaded_names = []   # 本次上传到 input 的临时图，结束后清理
+    # 最后一段额外向后拉长的缓冲帧（默认 1 秒）：用同一张末帧图继续引导，画面保持稳定，
+    # 即使模型在结尾仍有轻微漂移，也落在这段缓冲里，用户可在剪辑软件中轻松裁掉尾巴。
+    tail_pad_frames = max(0, int(round(float(params.get('tail_pad_sec', 1.0) or 0) * fps)))
+    last_idx = len(img_segs) - 1
     for i, seg in enumerate(img_segs):
         length = max(1, int(seg.get('length', 90)))
+        if i == last_idx and tail_pad_frames > 0:
+            length += tail_pad_frames   # 仅最后一段向后拉长缓冲（其后无转场段，安全）
         img_name = ''
         if seg.get('image_b64'):
             try:
