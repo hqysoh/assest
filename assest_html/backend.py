@@ -1236,14 +1236,17 @@ def run_director_singularity_sync(params, task_id=None):
     main_segments = []
     cursor = 0
     uploaded_names = []   # 本次上传到 input 的临时图，结束后清理
-    # 最后一段额外向后拉长的缓冲帧（默认 1 秒）：用同一张末帧图继续引导，画面保持稳定，
-    # 即使模型在结尾仍有轻微漂移，也落在这段缓冲里，用户可在剪辑软件中轻松裁掉尾巴。
+    # 尾部静止缓冲（默认 1 秒，可由 tail_pad_sec 调节，0=关闭）：
+    # 根本原因——easy timelineInfoOutput 的 image_indexes 只取每个 segment 的 start_frame 作为
+    # LTX 的图像锚点（见插件 basic.py:959）。因此最后一镜的图只钉在它的起始帧，从该帧到视频结尾
+    # 这段没有任何图像锚点，LTX 在无约束区自由发挵 → 结尾漂出与本片无关的画面（即工作流示例的
+    # F1 直播片段）。解法：铺完正片后，追加一个独立尾段，其 start_frame 正好落在视频末尾，复用
+    # 最后一镜的末帧图 → image_indexes 会多一个「末尾锚点」→ 结尾被这张图钉住、静止不漂；这段是
+    # 纯静止缓冲，用户可在剪辑软件里直接裁掉。
     tail_pad_frames = max(0, int(round(float(params.get('tail_pad_sec', 1.0) or 0) * fps)))
-    last_idx = len(img_segs) - 1
+    last_img_name = ''      # 最后一镜的末帧图（用于尾部静止段的锚点）
     for i, seg in enumerate(img_segs):
         length = max(1, int(seg.get('length', 90)))
-        if i == last_idx and tail_pad_frames > 0:
-            length += tail_pad_frames   # 仅最后一段向后拉长缓冲（其后无转场段，安全）
         img_name = ''
         if seg.get('image_b64'):
             try:
@@ -1280,6 +1283,8 @@ def run_director_singularity_sync(params, task_id=None):
             'color': 'var(--secondary)',
         })
         cursor += length
+        if img_name:
+            last_img_name = img_name   # 持续更新，循环结束后即「最后一镜的末帧图」
 
         # 相邻段之间插入转场段（无图、纯文本），最后一段不插
         trans_text = str(seg.get('transition', '') or '').strip()
@@ -1294,6 +1299,30 @@ def run_director_singularity_sync(params, task_id=None):
                 'color': 'var(--secondary)',
             })
             cursor += trans_frames
+
+    # 追加尾部静止缓冲段：start_frame 落在视频末尾 cursor 处，复用末帧图作为新的图像锚点，
+    # flf 首尾同图把整段钉成静止画面。LTX 结尾因此有了明确的图像约束，不再漂出 F1。
+    if tail_pad_frames > 0 and last_img_name:
+        main_segments.append({
+            'id': f"tail-{random.randint(100000,999999)}",
+            'start_frame': cursor,
+            'end_frame': cursor + tail_pad_frames,
+            'content': {
+                # 明确要求静止定格，进一步抑制结尾漂移
+                'text': 'The final frame holds completely still, a frozen freeze-frame of the last shot, '
+                        'no camera movement, no new action, identical to the previous frame，无字幕',
+                'images': [{
+                    'source_type': 'input',
+                    'file_path': last_img_name,
+                    'file_name': last_img_name,
+                    'start_frame': 0,
+                    'end_frame': tail_pad_frames,
+                }],
+                'type': 'flf',
+            },
+            'color': 'var(--secondary)',
+        })
+        cursor += tail_pad_frames
 
     # total_length 必须精确等于 segments 铺满的实际帧数（cursor），不能用前端传的 total_frames 撑大。
     # 否则末尾 [cursor, total_frames) 是「无任何图像段覆盖」的空白区间，LTX 采样器会在该区间自由发挥，
