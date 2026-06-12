@@ -1147,6 +1147,9 @@ line-height:1.2;transition:border-color .18s,box-shadow .18s,background .18s;min
 /* 面板缩略图：缩小到 56x56，右下角标 #N */
 .sb-local-thumb{position:relative;width:60px;height:60px;border-radius:8px;overflow:hidden;background:var(--bg2);cursor:pointer;border:1px solid var(--bd);transition:transform .2s, border-color .2s}
 .sb-local-thumb:hover{transform:translateY(-1px);border-color:var(--ac)}
+/* 缩略图列：图 + 「替换」按钮纵向排列 */
+.sb-local-thumb-cell{display:flex;flex-direction:column;align-items:center;gap:0.28rem}
+.sb-local-replace{width:60px;padding:0.12rem 0;font-size:0.62rem;line-height:1.2;text-align:center;white-space:nowrap}
 .sb-local-badge{
     position:absolute;left:4px;top:4px;
     min-width:18px;height:18px;padding:0 5px;

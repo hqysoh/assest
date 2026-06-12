@@ -446,6 +446,64 @@ const StoryboardModule = {
         this.render(this.projectId);
     },
 
+    // ===== 四宫格某个面板：用「以往生成的任意图像」替换其画面（单选）=====
+    replacePanelImage(gid, i) {
+        const p = Storage.getProject(this.projectId);
+        const g = (p.storyboardGroups || []).find(x => x.id === gid);
+        if (!g) return;
+        const all = this._allImageAssets();
+        if (!all.length) { App.showToast('暂无可选图像，请先在人物/道具/场景页生成图，或生成四宫格', 'info'); return; }
+        const cur = (g.panelImages || [])[i];
+        const curStr = cur != null ? String(cur) : '';
+
+        const byGroup = {};
+        all.forEach(a => { (byGroup[a.group] = byGroup[a.group] || []).push(a); });
+        const sections = Object.keys(byGroup).map(grp => `
+            <div class="sb-pick-section">
+                <div class="sb-pick-section-title">${grp}（${byGroup[grp].length}）</div>
+                <div class="sb-pick-grid">
+                    ${byGroup[grp].map(a => `
+                        <div class="sb-pick-cell ${curStr === String(a.id) ? 'selected' : ''}" data-id="${a.id}" onclick="StoryboardModule._doReplacePanelImage('${gid}',${i},${a.id})">
+                            <img src="${a.url}" loading="lazy">
+                            <span class="sb-pick-name">${this.esc(a.name)}</span>
+                        </div>`).join('')}
+                </div>
+            </div>`).join('');
+
+        const mc = document.getElementById('modalContent');
+        mc.innerHTML = `
+            <div class="modal-header"><h2 class="modal-title">🔄 替换面板${i + 1}画面（单选）</h2><button class="modal-close" onclick="App.closeModal()">×</button></div>
+            <div class="modal-body sb-pick-body">
+                <p class="form-hint">点击任意一张图像即可替换本面板的画面。可选人物/道具/场景图，以及以往生成的四宫格及其切分图。原四宫格大图不变，仅替换此面板的切分图。</p>
+                ${sections}
+            </div>
+            <div class="modal-footer">
+                <button class="btn-secondary" onclick="App.closeModal()">取消</button>
+            </div>`;
+        document.getElementById('modalOverlay').classList.add('active');
+    },
+
+    async _doReplacePanelImage(gid, i, mediaId) {
+        const src = Storage.getMediaById(this.projectId, mediaId);
+        if (!src) { App.showToast('图像不存在', 'error'); return; }
+        App.closeModal();
+        // 复制一份为本面板专属切分图（ownerType=storyboards），避免与原图共用同一 mediaId 被联动删除。
+        // src.data 已是服务器相对路径（非 data:），_addMedia 会原样保存，不会二次落盘。
+        const copy = await Storage._addMedia(
+            this.projectId, 'image', 'storyboards', gid + '_panel' + i, src.data, src.mime || null,
+            { w: src.width || 0, h: src.height || 0 }
+        );
+        // 重新取最新工程，避免覆盖 _addMedia 内部已写入的 mediaLibrary
+        const p = Storage.getProject(this.projectId);
+        const g = (p.storyboardGroups || []).find(x => x.id === gid);
+        if (!g || !copy) { App.showToast('替换失败', 'error'); return; }
+        if (!Array.isArray(g.panelImages)) g.panelImages = [null, null, null, null];
+        g.panelImages[i] = copy.id;
+        Storage.updateProject(this.projectId, { storyboardGroups: p.storyboardGroups });
+        App.showToast(`已替换面板${i + 1}的画面`, 'success');
+        this.render(this.projectId);
+    },
+
     // ===== 收集「前期所有音频」：人物/道具/场景 + 已生成的分镜配音 =====
     _allAudioAssets() {
         const p = Storage.getProject(this.projectId);
@@ -876,9 +934,12 @@ workflow: (Storage.getSettings().voiceSettings || {}).cloneWorkflow || 'vocpm',
                 <input type="checkbox" class="sb-pick-cb" ${selected ? 'checked' : ''} onchange="StoryboardModule.togglePanelSelected('${g.id}',${i},this.checked)">
                 <button class="sb-mark-btn ${marked ? 'on' : ''}" title="${marked ? '已标记，点击取消' : '标记为已处理（置灰）'}" onclick="StoryboardModule.togglePanelMarked('${g.id}',${i})">${marked ? '✅' : '◻'}</button>
             </div>
-            <div class="sb-local-thumb" onclick="${pUrl ? `CharacterModule.openImageZoom('${pUrl}','${zoomTitle}','')` : ''}">
-                ${pUrl ? `<img src="${pUrl}" alt="面板${i + 1}">` : `<span class="sb-local-no">${i + 1}</span>`}
-                <span class="sb-local-badge">${i + 1}</span>
+            <div class="sb-local-thumb-cell">
+                <div class="sb-local-thumb" onclick="${pUrl ? `CharacterModule.openImageZoom('${pUrl}','${zoomTitle}','')` : ''}">
+                    ${pUrl ? `<img src="${pUrl}" alt="面板${i + 1}">` : `<span class="sb-local-no">${i + 1}</span>`}
+                    <span class="sb-local-badge">${i + 1}</span>
+                </div>
+                <button class="btn-ghost btn-tiny sb-local-replace" title="从以往生成的任意图像中选一张替换本面板的画面" onclick="event.stopPropagation();StoryboardModule.replacePanelImage('${g.id}',${i})">🔄 替换</button>
             </div>
             <div class="sb-local-main">
                 ${InlineEdit.field(local, {
