@@ -2455,6 +2455,17 @@ workflow: (Storage.getSettings().voiceSettings || {}).cloneWorkflow || 'vocpm',
         } catch (e) { return ''; }
     },
 
+    // 生成一张纯白 PNG 的 base64（不含 data: 前缀），用于「白场尾段」。
+    // 尺寸用通用竖屏 768×1280；后端会按工作流分辨率 resize，纯白图任何比例缩放仍是纯白，不影响。
+    _whiteFrameB64() {
+        const cv = document.createElement('canvas');
+        cv.width = 768; cv.height = 1280;
+        const ctx = cv.getContext('2d');
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, cv.width, cv.height);
+        return (cv.toDataURL('image/png') || '').split(',')[1] || '';
+    },
+
     // 前端 canvas 2x2 等分切四宫格 → 存为 4 张 panel 图
     async _splitFourGrid(g, dataUrl) {
         // 历史重选/删除回退时传入的是「服务器路径URL」，直接画到 canvas 会污染画布导致 toDataURL 抛 SecurityError、
@@ -2982,20 +2993,21 @@ workflow: (Storage.getSettings().voiceSettings || {}).cloneWorkflow || 'vocpm',
             cursor += len;
         });
 
-        // 自动追加「定格尾段」：把最后一张图原样复制一份接在末尾（空提示词、无转场、无音频）。
-        // 作用：给视频结尾一个图像锚点，避免 LTX 在无约束的结尾区自由发挥（漂出工作流示例 F1 画面）。
-        // 它是时间轴上一个真实、可见、可拖动、可删除的块——不需要就直接在预览区删掉它。
+        // 自动追加「白场尾段」：在末尾接一段纯白画面（空提示词、无转场、无音频），
+        // 时长 = 最后一个正片分镜的时长。作用：把 LTX 结尾固有的无约束漂移（漂出工作流示例 F1 画面）
+        // 落在这段白场里，便于在剪辑软件里一眼识别并裁掉。它是时间轴上真实、可见、可拖动、可删除的块。
         if (imageClips.length) {
             const lastClip = imageClips[imageClips.length - 1];
-            const tailLen = Math.round(this.FPS * 1.0);   // 默认 1 秒
+            const tailLen = lastClip.length || Math.round(this.FPS * 1.0);   // 等于最后一镜的时长
             imageClips.push({
                 uid: Storage._uid(),
-                imageId: lastClip.imageId,     // 复用最后一镜的图
+                imageId: null,                 // 不复用任何图
+                whiteFrame: true,              // 纯白画面（提交时生成白图 b64，渲染时白底）
                 prompt: '',                    // 不带 local 提示词
                 dialogue: {}, transition: 'cut',
                 shotTransition: '', transitionDur: 0,
                 start: cursor, length: tailLen,
-                isTail: true,                  // 标记：定格尾段（UI 可特殊标识）
+                isTail: true,                  // 标记：白场尾段（UI 特殊标识）
             });
             cursor += tailLen;
         }
@@ -3272,14 +3284,15 @@ workflow: (Storage.getSettings().voiceSettings || {}).cloneWorkflow || 'vocpm',
             const url = m ? Storage.mediaUrl(m.data) : '';
             const selected = (c.uid === tl.selectedUid);
             const promptText = c.prompt ? this.esc(c.prompt) : '';   // 块底叠加显示的 local 提示词
-            return `<div class="sb-dir-clip sb-dir-img ${overflow ? 'sb-dir-of' : ''} ${selected ? 'sb-dir-sel' : ''}" data-kind="img" data-uid="${c.uid}" data-i="${i}"
-                style="left:${left}px;width:${width}px;${url ? `background-image:url('${url}')` : ''}">
+            const isWhite = !!c.whiteFrame;
+            return `<div class="sb-dir-clip sb-dir-img ${overflow ? 'sb-dir-of' : ''} ${selected ? 'sb-dir-sel' : ''} ${isWhite ? 'sb-dir-white' : ''}" data-kind="img" data-uid="${c.uid}" data-i="${i}"
+                style="left:${left}px;width:${width}px;${isWhite ? 'background:#fff' : (url ? `background-image:url('${url}')` : '')}">
                 ${overflow ? '<div class="sb-dir-of-badge" title="超出视频总长，不会被合成">超出</div>' : ''}
                 <div class="sb-dir-handle l" data-h="l" title="拖动改时长（后续图片跟随移动）"></div>
                 <div class="sb-dir-clip-body" title="点击：在下方编辑提示词 / 拖动换位 / 拉两侧改时长">
-                    ${url ? '' : '<span class="sb-dir-noimg">无图</span>'}
-                    <span class="sb-dir-clip-meta">${c.isTail ? '🔚 定格' : '#' + (i + 1)} · ${secsLabel}</span>
-                    ${c.isTail ? '<span class="sb-dir-clip-prompt" title="自动追加的定格尾段：复制最后一镜的图，给结尾一个图像锚点防止漂移；不需要可点 × 删除">定格尾段·可删</span>' : (promptText ? `<span class="sb-dir-clip-prompt" title="${promptText}">${promptText}</span>` : '')}
+                    ${(url || isWhite) ? '' : '<span class="sb-dir-noimg">无图</span>'}
+                    <span class="sb-dir-clip-meta">${c.isTail ? '⬜ 白场' : '#' + (i + 1)} · ${secsLabel}</span>
+                    ${c.isTail ? '<span class="sb-dir-clip-prompt" title="自动追加的白场尾段：纯白画面，时长=最后一个分镜。用于把 LTX 结尾漂移隔开、便于剪辑裁掉；不需要可点 × 删除" style="color:#888">白场尾段·可删</span>' : (promptText ? `<span class="sb-dir-clip-prompt" title="${promptText}">${promptText}</span>` : '')}
                     <button class="sb-dir-clip-x" title="删除" onmousedown="event.stopPropagation()" onclick="StoryboardModule.tlDelClip('img','${c.uid}')">×</button>
                 </div>
                 <div class="sb-dir-handle r" data-h="r" title="拖动改时长（后续图片跟随移动）"></div>
@@ -4067,9 +4080,15 @@ const tl = this._tl;
         const imageSegments = [];
         for (const c of [...tl.imageClips].sort((a, b) => a.start - b.start)) {
             if (c.start >= total) continue;                 // 完全超出 → 不合成
-            const img = c.imageId != null ? Storage.getMediaById(this.projectId, c.imageId) : null;
-            if (!img) continue;
-            const b64 = await this._urlToB64(Storage.mediaUrl(img.data));
+            let b64;
+            if (c.whiteFrame) {
+                // 白场尾段：动态生成一张纯白 PNG（尺寸尽量贴合最近一张正片图，拿不到则用竖屏默认）
+                b64 = this._whiteFrameB64();
+            } else {
+                const img = c.imageId != null ? Storage.getMediaById(this.projectId, c.imageId) : null;
+                if (!img) continue;
+                b64 = await this._urlToB64(Storage.mediaUrl(img.data));
+            }
             // 转场「附着」在图像段上：把该段的转场文字 + 时长一并带给后端，
             // 后端会自动在相邻两段之间插入「无图纯文本转场段」并顺延音频（不用手动摆位置）。
             // 全局「禁用转场」开启时：不拼接转场段（文本清空、时长置 0）；未禁用时保持现状。
