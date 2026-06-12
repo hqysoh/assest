@@ -1250,8 +1250,13 @@ def run_director_singularity_sync(params, task_id=None):
         # 关键：图已上传到 ComfyUI input 目录，直接用 source_type="input" + file_path 本地读取，
         # 不要用 url（easy timelineEditor 的 load_image_tensor 解析 url 会走 urllib，
         # 受本机代理影响访问 127.0.0.1:8188 失败 → 图丢失 → PromptRelay 回退 704x480）。
+        # 统一在每段 prompt 末尾追加「无字幕」，避免模型把对白/解说文字当字幕烧进画面
+        # （尤其带「XX说：…」对白的段，否则文字易被渲染成弹出字幕；已含则不重复）。
+        seg_text = (seg.get('prompt', '') or '').strip()
+        if seg_text and '无字幕' not in seg_text:
+            seg_text = seg_text + '，无字幕'
         content = {
-            'text': seg.get('prompt', '') or '',
+            'text': seg_text,
             'images': ([{
                 'source_type': 'input',
                 'file_path': img_name,
