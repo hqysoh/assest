@@ -4420,7 +4420,10 @@ if (!tl._audioUserSet) {
     // 显示名：用户重命名优先；否则合成视频用「分镜X-Y(N)」，导入视频用原文件名（去扩展名）
     _vhDisplayName(v) {
         if (v.displayName && v.displayName.trim()) return v.displayName.trim();
-        if (v.imported) return (v.rawName || '导入视频').replace(/\.[^.]+$/, '');
+        // 默认显示文件本来的名字（ComfyUI 生成的原始文件名 / 导入文件名，去扩展名）
+        if (v.rawName && v.rawName.trim()) return v.rawName.replace(/\.[^.]+$/, '');
+        if (v.imported) return '导入视频';
+        // 兜底：无原始文件名时才用「分镜X-Y(N)」
         return `${v.baseName}(${v.seq})`;
     },
 
