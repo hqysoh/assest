@@ -2993,24 +2993,8 @@ workflow: (Storage.getSettings().voiceSettings || {}).cloneWorkflow || 'vocpm',
             cursor += len;
         });
 
-        // 自动追加「白场尾段」：在末尾接一段纯白画面（空提示词、无转场、无音频），
-        // 时长 = 最后一个正片分镜的时长。作用：把 LTX 结尾固有的无约束漂移（漂出工作流示例 F1 画面）
-        // 落在这段白场里，便于在剪辑软件里一眼识别并裁掉。它是时间轴上真实、可见、可拖动、可删除的块。
-        if (imageClips.length) {
-            const lastClip = imageClips[imageClips.length - 1];
-            const tailLen = lastClip.length || Math.round(this.FPS * 1.0);   // 等于最后一镜的时长
-            imageClips.push({
-                uid: Storage._uid(),
-                imageId: null,                 // 不复用任何图
-                whiteFrame: true,              // 纯白画面（提交时生成白图 b64，渲染时白底）
-                prompt: '',                    // 不带 local 提示词
-                dialogue: {}, transition: 'cut',
-                shotTransition: '', transitionDur: 0,
-                start: cursor, length: tailLen,
-                isTail: true,                  // 标记：白场尾段（UI 特殊标识）
-            });
-            cursor += tailLen;
-        }
+        // 注：结尾乱码/花屏已在后端用「总帧数对齐到 8k+1 + 末段延伸」根治（见 backend.py），
+        // 不再需要前端追加白场/定格尾段。
 
         // 参与合成的分镜组号范围（用于视频历史命名「分镜X-Y」）：取 segments 涉及组在 all 中的序号
         const involvedIdx = [];

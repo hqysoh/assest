@@ -1289,13 +1289,28 @@ def run_director_singularity_sync(params, task_id=None):
             })
             cursor += trans_frames
 
-    # 注：尾部「定格尾段」现由前端时间轴显式追加为可见可删的图像块（见 storyboard.js openTimeline），
-    # 后端不再自动拼尾段，以免重复。
-    # total_length 必须精确等于 segments 铺满的实际帧数（cursor），不能用前端传的 total_frames 撑大。
-    # 否则末尾 [cursor, total_frames) 是「无任何图像段覆盖」的空白区间，LTX 采样器会在该区间自由发挥，
-    # 表现为视频结尾出现一小段「与最后一镜无关/类似工作流默认提示词」的漂移画面（用户反馈的 bug）。
-    # 前端的 total_frames 仅用于「时间轴超出截断」，不应反向把时间轴长度撑长。
+    # total_length 取 segments 铺满的实际帧数（cursor）。
     total_frames = cursor if cursor > 0 else max(int(params.get('total_frames') or 0), 1)
+
+    # ★ 结尾乱码/花屏根因修复：LTX latent 时序按 8 帧一组压缩，合法总帧数必须是 8k+1
+    #   （如 121、201、601…）。若 total 不是 8k+1，VAE 解码时末尾会多出 1~7 帧「不足一个 latent 块」
+    #   的悬空帧——这些帧没有任何图像锚点（image_indexes 只钉到各段 start_frame），LTX 在此自由发挥，
+    #   解码出一坨乱码/类文字花纹，固定出现在每条视频结尾。
+    #   修法：把 total 向上对齐到最近的 8k+1，并把多出的帧并入「最后一个有图的段」——
+    #   让最后一镜的图锚点一直延伸到真正的末帧，末尾不再有无锚帧，乱码消失，且剧情画面完整保留。
+    aligned = ((total_frames - 1 + 7) // 8) * 8 + 1
+    if aligned != total_frames:
+        pad = aligned - total_frames
+        # 找最后一个带图的 maintain 段，把它和它的引导图 end_frame 一起延伸 pad 帧
+        last_img_seg = None
+        for s in main_segments:
+            if s.get('content', {}).get('images'):
+                last_img_seg = s
+        if last_img_seg is not None:
+            last_img_seg['end_frame'] += pad
+            for im in last_img_seg['content']['images']:
+                im['end_frame'] = im.get('end_frame', 0) + pad
+        total_frames = aligned
 
     timeline_obj = {
         'tracks': [
