@@ -1300,17 +1300,16 @@ def run_director_singularity_sync(params, task_id=None):
             })
             cursor += trans_frames
 
-    # 追加尾部静止缓冲段：start_frame 落在视频末尾 cursor 处，复用末帧图作为新的图像锚点，
-    # flf 首尾同图把整段钉成静止画面。LTX 结尾因此有了明确的图像约束，不再漂出 F1。
+    # 追加尾部静止缓冲段：直接把「最后一镜的末帧图」原样复制一份接在末尾，start_frame 落在视频末尾
+    # cursor 处 → image_indexes 多一个末尾锚点，结尾被这张图钉住、静止不漂（不再漂出 F1）。
+    # 不带任何 local 提示词（text 留空），即纯粹的一段定格画面；用户若不需要可在剪辑软件里直接删掉。
     if tail_pad_frames > 0 and last_img_name:
         main_segments.append({
             'id': f"tail-{random.randint(100000,999999)}",
             'start_frame': cursor,
             'end_frame': cursor + tail_pad_frames,
             'content': {
-                # 明确要求静止定格，进一步抑制结尾漂移
-                'text': 'The final frame holds completely still, a frozen freeze-frame of the last shot, '
-                        'no camera movement, no new action, identical to the previous frame，无字幕',
+                'text': '',   # 不加 local 提示词，原样复制末帧图作为可删除的尾段
                 'images': [{
                     'source_type': 'input',
                     'file_path': last_img_name,
