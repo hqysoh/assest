@@ -4111,7 +4111,6 @@ const tl = this._tl;
                 max_guide_strength: parseFloat(tl.guideStrength || '1.00'),   // 每段引导强度上限
                 use_custom_audio: (tl.useCustomAudio !== false) && audioSegments.length > 0,
                 fps: tl.fps,
-                tail_pad_sec: 0,   // 关闭后端自动尾段：尾段已由前端时间轴显式追加为可见可删的块，避免重复
                 workflow: tl.workflow || 'singularity',   // 导演台工作流：singularity(默认) | director
             });
             if (!submit.success || !submit.task_id) throw new Error(submit.error || '提交失败');

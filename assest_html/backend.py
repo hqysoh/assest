@@ -1236,15 +1236,6 @@ def run_director_singularity_sync(params, task_id=None):
     main_segments = []
     cursor = 0
     uploaded_names = []   # 本次上传到 input 的临时图，结束后清理
-    # 尾部静止缓冲（默认 1 秒，可由 tail_pad_sec 调节，0=关闭）：
-    # 根本原因——easy timelineInfoOutput 的 image_indexes 只取每个 segment 的 start_frame 作为
-    # LTX 的图像锚点（见插件 basic.py:959）。因此最后一镜的图只钉在它的起始帧，从该帧到视频结尾
-    # 这段没有任何图像锚点，LTX 在无约束区自由发挵 → 结尾漂出与本片无关的画面（即工作流示例的
-    # F1 直播片段）。解法：铺完正片后，追加一个独立尾段，其 start_frame 正好落在视频末尾，复用
-    # 最后一镜的末帧图 → image_indexes 会多一个「末尾锚点」→ 结尾被这张图钉住、静止不漂；这段是
-    # 纯静止缓冲，用户可在剪辑软件里直接裁掉。
-    tail_pad_frames = max(0, int(round(float(params.get('tail_pad_sec', 1.0) or 0) * fps)))
-    last_img_name = ''      # 最后一镜的末帧图（用于尾部静止段的锚点）
     for i, seg in enumerate(img_segs):
         length = max(1, int(seg.get('length', 90)))
         img_name = ''
@@ -1283,8 +1274,6 @@ def run_director_singularity_sync(params, task_id=None):
             'color': 'var(--secondary)',
         })
         cursor += length
-        if img_name:
-            last_img_name = img_name   # 持续更新，循环结束后即「最后一镜的末帧图」
 
         # 相邻段之间插入转场段（无图、纯文本），最后一段不插
         trans_text = str(seg.get('transition', '') or '').strip()
@@ -1300,29 +1289,8 @@ def run_director_singularity_sync(params, task_id=None):
             })
             cursor += trans_frames
 
-    # 追加尾部静止缓冲段：直接把「最后一镜的末帧图」原样复制一份接在末尾，start_frame 落在视频末尾
-    # cursor 处 → image_indexes 多一个末尾锚点，结尾被这张图钉住、静止不漂（不再漂出 F1）。
-    # 不带任何 local 提示词（text 留空），即纯粹的一段定格画面；用户若不需要可在剪辑软件里直接删掉。
-    if tail_pad_frames > 0 and last_img_name:
-        main_segments.append({
-            'id': f"tail-{random.randint(100000,999999)}",
-            'start_frame': cursor,
-            'end_frame': cursor + tail_pad_frames,
-            'content': {
-                'text': '',   # 不加 local 提示词，原样复制末帧图作为可删除的尾段
-                'images': [{
-                    'source_type': 'input',
-                    'file_path': last_img_name,
-                    'file_name': last_img_name,
-                    'start_frame': 0,
-                    'end_frame': tail_pad_frames,
-                }],
-                'type': 'flf',
-            },
-            'color': 'var(--secondary)',
-        })
-        cursor += tail_pad_frames
-
+    # 注：尾部「定格尾段」现由前端时间轴显式追加为可见可删的图像块（见 storyboard.js openTimeline），
+    # 后端不再自动拼尾段，以免重复。
     # total_length 必须精确等于 segments 铺满的实际帧数（cursor），不能用前端传的 total_frames 撑大。
     # 否则末尾 [cursor, total_frames) 是「无任何图像段覆盖」的空白区间，LTX 采样器会在该区间自由发挥，
     # 表现为视频结尾出现一小段「与最后一镜无关/类似工作流默认提示词」的漂移画面（用户反馈的 bug）。
