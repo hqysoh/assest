@@ -1266,6 +1266,11 @@ def run_director_singularity_sync(params, task_id=None):
     uploaded_names = []   # 本次上传到 input 的临时图，结束后清理
     for i, seg in enumerate(img_segs):
         length = max(1, int(seg.get('length', 90)))
+        # 空段跳过：既没有图也没有提示词的段不发给 ComfyUI，
+        # 否则时间轴上会出现「缺 prompt 的 segment」→ LTXDirector 报错
+        # "There is a segment on the timeline missing a prompt!"
+        if not seg.get('image_b64') and not (seg.get('prompt', '') or '').strip():
+            continue
         img_name = ''
         if seg.get('image_b64'):
             try:
@@ -1473,6 +1478,10 @@ def run_director_sync(params, task_id=None):
         cumulative_shift = 0
         for i, seg in enumerate(img_segs):
             length = int(seg.get('length', 90))
+            # 空段跳过：既没有图也没有提示词的段不发给 ComfyUI，
+            # 否则 LTXDirector 会报「missing a prompt」。
+            if not seg.get('image_b64') and not (seg.get('prompt', '') or '').strip():
+                continue
             img_file = ''
             if seg.get('image_b64'):
                 try:

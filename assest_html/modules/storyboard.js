@@ -3110,10 +3110,21 @@ emotions: this._collectEmotions(),
     // 读取各音频块真实时长（秒→帧）。除了用于裁剪上限，还在「初始化对齐」时
     // 把音频块 length 设为真实时长，并让其关联的图像段对齐到同样时长（s 数一致），
     // 然后整体重新紧贴布局、音频跟随对应图像段的 start —— 实现「图音对齐、序号一致」。
+    // 读取设置中「图像比音频多出的时长」（秒）→ 帧。前/后可分别设置（默认各 0.5s）。
+    // 用于时间轴音频/图像对齐：图像段 = 音频 + 前留白 + 后留白，音频在段内后移「前留白」帧。
+    _audioPadFrames() {
+        const tl = this._tl;
+        const fps = (tl && tl.fps) || this.FPS || 24;
+        const defs = (Storage.getSettings().imageDefaults) || {};
+        const head = Number.isFinite(+defs.audioPadHeadSec) ? Math.max(0, +defs.audioPadHeadSec) : 0.5;
+        const tail = Number.isFinite(+defs.audioPadTailSec) ? Math.max(0, +defs.audioPadTailSec) : 0.5;
+        return { head: Math.round(head * fps), tail: Math.round(tail * fps) };
+    },
+
     async _loadAudioDurations(alignInit) {
         const tl = this._tl; if (!tl) return;
-        // 有音频的图像段：在音频时长基础上前后各留 0.5 秒画面（图像段 = 音频 + 1s，音频在段内居中后移 0.5s）
-        const PAD_FRAMES = Math.round(0.5 * tl.fps);   // 前/后各 0.5 秒
+        // 有音频的图像段：在音频时长基础上前/后各留一段画面（时长在设置中可调，以秒为单位）。
+        const { head: PAD_HEAD, tail: PAD_TAIL } = this._audioPadFrames();
         for (const a of tl.audioClips) {
             if (a.audioDurationFrames) continue;
             const m = a.audioId != null ? Storage.getMediaById(this.projectId, a.audioId) : null;
@@ -3124,9 +3135,9 @@ emotions: this._collectEmotions(),
                 if (alignInit) {
                     // 音频块时长 = 真实时长
                     a.length = a.audioDurationFrames;
-                    // 关联图像段时长 = 音频时长 + 前后各 0.5 秒（让画面在语音前后各多留 0.5 秒）
+                    // 关联图像段时长 = 音频时长 + 前留白 + 后留白（让画面在语音前/后各多留一段，秒数可在设置中调）
                     const img = a.imgUid ? tl.imageClips.find(c => c.uid === a.imgUid) : null;
-                    if (img) img.length = a.audioDurationFrames + PAD_FRAMES * 2;
+                    if (img) img.length = a.audioDurationFrames + PAD_HEAD + PAD_TAIL;
                 }
             } catch (e) { /* 忽略 */ }
         }
@@ -3136,8 +3147,8 @@ emotions: this._collectEmotions(),
             tl.audioClips.forEach(a => {
                 const img = a.imgUid ? tl.imageClips.find(c => c.uid === a.imgUid) : null;
                 if (img) {
-                    // 仅当图像段确实比音频长（即已加过 padding）时，音频才后移 1s；否则与段首对齐
-                    const pad = (img.length > a.length) ? PAD_FRAMES : 0;
+                    // 仅当图像段确实比音频长（即已加过 padding）时，音频才后移「前留白」帧；否则与段首对齐
+                    const pad = (img.length > a.length) ? PAD_HEAD : 0;
                     a.start = img.start + pad;
                 }
             });
@@ -4099,6 +4110,8 @@ this._tl._audioUserSet = true;   // 标记用户手动设置过：之后切换�
         // 每个图像段 uid → 其关联音频段的真实时长（帧）。
         // 优先用 imgUid 显式关联；若关联缺失（手动加的音频等），退回按时间重叠匹配，
         // 确保「图像段时长 ≥ 落在它身上的音频时长」，从根本上保证转场落在语音之后。
+        // 图像段需要的最小长度 = 关联音频时长 + 前留白 + 后留白（前后留白秒数可在设置中调）。
+        const { head: PAD_HEAD, tail: PAD_TAIL } = this._audioPadFrames();
         const audLenByImg = {};
         const imgClipsSorted = [...tl.imageClips].sort((a, b) => a.start - b.start);
         for (const a of tl.audioClips) {
@@ -4110,7 +4123,8 @@ this._tl._audioUserSet = true;   // 标记用户手动设置过：之后切换�
                 img = imgClipsSorted.find(c => a.start >= c.start && a.start < c.start + (c.length || 0))
                       || imgClipsSorted[imgClipsSorted.length - 1];
             }
-            if (img) audLenByImg[img.uid] = Math.max(audLenByImg[img.uid] || 0, frames);
+            // 图像段要比音频多出前后留白，保证画面在语音前/后各多留一段
+            if (img) audLenByImg[img.uid] = Math.max(audLenByImg[img.uid] || 0, frames + PAD_HEAD + PAD_TAIL);
         }
         // 把图像段 length 就地对齐到「自身与其音频的较大值」，并重新紧贴布局（ripple），
         // 让后续段 start、音频 start、totalFrames 全部跟着更新到正确位置。
@@ -4120,13 +4134,12 @@ this._tl._audioUserSet = true;   // 标记用户手动设置过：之后切换�
             if (need > (c.length || 0)) { c.length = need; aligned = true; }
         }
         if (aligned) {
-            const PAD = Math.round(0.5 * tl.fps);           // 前置 0.5 秒画面（与初始化对齐保持一致）
             this._relayoutImages();                       // 图像轨重排：start 跟随新 length
             tl.audioClips.forEach(a => {                  // 音频跟随各自图像段 start 对齐
                 const img = a.imgUid ? tl.imageClips.find(x => x.uid === a.imgUid) : null;
                 if (img) {
-                    // 图像段比音频长（含前后各 0.5s padding）时，音频在段内后移 0.5s，保留语音前的留白
-                    const pad = (img.length > (a.audioDurationFrames || a.length || 0)) ? PAD : 0;
+                    // 图像段比音频长（含前后留白）时，音频在段内后移「前留白」帧，保留语音前的画面
+                    const pad = (img.length > (a.audioDurationFrames || a.length || 0)) ? PAD_HEAD : 0;
                     a.start = img.start + pad;
                 }
             });
@@ -4145,6 +4158,11 @@ this._tl._audioUserSet = true;   // 标记用户手动设置过：之后切换�
         const imageSegments = [];
         for (const c of [...tl.imageClips].sort((a, b) => a.start - b.start)) {
             if (c.start >= total) continue;                 // 完全超出 → 不合成
+            // 空段跳过：既没有图（非白场、无 imageId）又没有提示词/台词的段不发，
+            // 否则时间轴会出现缺 prompt 的 segment → LTXDirector 报错。
+            const segPrompt = (c.prompt || (c.dialogue && c.dialogue.text) || '').trim();
+            const hasImage = c.whiteFrame || c.imageId != null;
+            if (!hasImage && !segPrompt) continue;
             let b64;
             if (c.whiteFrame) {
                 // 白场尾段：动态生成一张纯白 PNG（尺寸尽量贴合最近一张正片图，拿不到则用竖屏默认）

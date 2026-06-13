@@ -70,6 +70,17 @@ const SettingsModule = {
                     <p class="form-hint">四宫格切分为 4 张时，每个面板四周向内裁掉的像素数，用于去掉宫格之间的白边/分隔线。0 = 不裁切。</p>
                 </div>
             </div>
+            <div class="form-row">
+                <div class="form-col">
+                    <label class="form-label">语音前留白（秒）</label>
+                    <input type="number" class="form-input" id="imgPadHead" min="0" max="10" step="0.1" value="${Number.isFinite(+defs.audioPadHeadSec) ? +defs.audioPadHeadSec : 0.5}" onchange="SettingsModule.saveImageDefaults()" placeholder="0.5">
+                </div>
+                <div class="form-col">
+                    <label class="form-label">语音后留白（秒）</label>
+                    <input type="number" class="form-input" id="imgPadTail" min="0" max="10" step="0.1" value="${Number.isFinite(+defs.audioPadTailSec) ? +defs.audioPadTailSec : 0.5}" onchange="SettingsModule.saveImageDefaults()" placeholder="0.5">
+                </div>
+            </div>
+            <p class="form-hint">时间轴上图像与音频对齐时，图像段会比关联音频多出这段画面：语音开始<strong>前</strong>留白 + 结束<strong>后</strong>留白，避免一开口就切镜、话没说完就转场。各 0 = 画面与音频严格等长。</p>
         </div>
 
         <div class="settings-section">
@@ -184,11 +195,21 @@ const SettingsModule = {
         let fgTrim = parseInt((document.getElementById('imgFgTrim') || {}).value, 10);
         if (!Number.isFinite(fgTrim) || fgTrim < 0) fgTrim = 0;
         if (fgTrim > 200) fgTrim = 200;
+        const clampSec = (id, def) => {
+            let v = parseFloat((document.getElementById(id) || {}).value);
+            if (!Number.isFinite(v) || v < 0) v = def;
+            if (v > 10) v = 10;
+            return v;
+        };
+        const audioPadHeadSec = clampSec('imgPadHead', 0.5);
+        const audioPadTailSec = clampSec('imgPadTail', 0.5);
         const defs = {
             ...(s.imageDefaults || {}),
             quality: document.getElementById('imgQuality').value,
             size: document.getElementById('imgSize').value,
-            fgTrim
+            fgTrim,
+            audioPadHeadSec,
+            audioPadTailSec
         };
         Storage.saveSettings({ imageDefaults: defs });
         this.flashSaved();
