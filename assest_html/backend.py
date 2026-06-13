@@ -1363,24 +1363,31 @@ def run_director_singularity_sync(params, task_id=None):
     }
     timeline_data = json.dumps(timeline_obj, ensure_ascii=False)
 
-    # 注入工作流：仅写 easy timelineEditor 的 timeline_data 与 global_prompt（前端没传则保留 JSON 原值）；
-    # 随机化两个 Stage 种子（Stage1/Stage2 都参与，保证两阶段采样每次出片不同）；
-    # epsilon 不注入，完全沿用工作流 JSON 节点21 的默认值（0.25）；
-    # Using Editor Audio 保持 false（由模型按 text 中的对白生成语音）。
+    # 注入工作流：仅写 easy timelineEditor 的 timeline_data；其余（global_prompt、epsilon、
+    # Stage 种子、Using Editor Audio 等）全部沿用工作流 JSON 原值，最大程度对齐 ComfyUI 图形界面，
+    # 便于排查末尾异常画面。
+    # 注：原先还会注入 global_prompt 与随机化 Stage 种子，现按需求一并去掉。
     for nid, node in workflow.items():
         ct = node.get('class_type')
         if ct == 'easy timelineEditor':
             node['inputs']['timeline_data'] = timeline_data
-        elif ct == 'PromptRelaySmartEncode':
-            if 'global_prompt' in node['inputs']:
-                node['inputs']['global_prompt'] = params.get('global_prompt', '') or node['inputs'].get('global_prompt', '')
-        elif ct == 'PrimitiveInt' and (node.get('_meta', {}) or {}).get('title', '').lower().startswith('stage'):
-            node['inputs']['value'] = random.randint(1, 2**31)
 
     # 注：原先这里有一段对 LTX2SamplingPreviewOverride（采样实时预览节点）的剪枝逻辑——
     # 因后端经 /api/prompt 提交、无前端会话，该节点推预览会崩。现工作流已在 ComfyUI 里
     # 用 Ctrl+B（bypass）摘掉该节点并重新导出，JSON 中已不含此节点，故剪枝代码已删除。
     # 若将来换回带该节点的工作流，请在 ComfyUI 里 bypass 后再导出，不要在后端硬剪（易错接上游导致尾部花屏）。
+
+    # === 临时排查：导出最终提交给 ComfyUI 的完整 workflow（注入 timeline_data 之后的真实入参）===
+    # 排查完末尾异常画面后可删除本段。
+    try:
+        _dbg_dir = os.path.join(os.path.dirname(__file__), "..", "workflow-api")
+        _dbg_path = os.path.join(_dbg_dir, "_debug_singularity_submit.json")
+        with open(_dbg_path, 'w', encoding='utf-8') as _f:
+            json.dump(workflow, _f, ensure_ascii=False, indent=2)
+        print(f"[Singularity][debug] 已导出最终提交 workflow → {os.path.abspath(_dbg_path)}")
+    except Exception as _e:
+        print(f"[Singularity][debug] 导出失败（忽略）: {_e}")
+    # === 临时排查结束 ===
 
     try:
         try:
