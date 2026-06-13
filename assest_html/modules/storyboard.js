@@ -4022,25 +4022,46 @@ this._tl._audioUserSet = true;   // 标记用户手动设置过：之后切换�
         if (!c || c.groupId == null) return;
         // 按 段uid:字段 维度各自 debounce，避免「快速切换不同输入框」时后一次取消前一次的写盘导致丢失
         if (!this._clipSyncTimers) this._clipSyncTimers = {};
+        if (!this._clipSyncPending) this._clipSyncPending = {};
         const tkey = `${c.uid}:${field}`;
+        // 记下挂起项，关闭弹窗时可立即 flush（避免「改完立刻关弹窗」时 400ms 定时器还没触发→外部显示旧值）
+        this._clipSyncPending[tkey] = { c, field };
         clearTimeout(this._clipSyncTimers[tkey]);
         this._clipSyncTimers[tkey] = setTimeout(() => {
-            const p = Storage.getProject(this.projectId);
-            const g = (p.storyboardGroups || []).find(x => x.id === c.groupId);
-            if (!g) return;
-            if (field === 'prompt') {
-                if (c.single) {
-                    g.prompt = c.prompt || '';
-                } else {
-                    if (!Array.isArray(g.localPrompts)) g.localPrompts = ['', '', '', ''];
-                    g.localPrompts[c.panel] = c.prompt || '';
-                }
-            } else if (field === 'trans') {
-                if (!Array.isArray(g.shotTransitions)) g.shotTransitions = ['', '', '', ''];
-                g.shotTransitions[c.panel] = c.shotTransition || '';
-            }
-            Storage.updateProject(this.projectId, { storyboardGroups: p.storyboardGroups });
+            this._writeClipToStoryboard(c, field);
+            delete this._clipSyncPending[tkey];
         }, 400);
+    },
+    // 立即把单个 clip 的某字段写回原始分镜并持久化（不重绘外部，供 debounce / flush 复用）
+    _writeClipToStoryboard(c, field) {
+        if (!c || c.groupId == null) return;
+        const p = Storage.getProject(this.projectId);
+        const g = (p.storyboardGroups || []).find(x => x.id === c.groupId);
+        if (!g) return;
+        if (field === 'prompt') {
+            if (c.single) {
+                g.prompt = c.prompt || '';
+            } else {
+                if (!Array.isArray(g.localPrompts)) g.localPrompts = ['', '', '', ''];
+                g.localPrompts[c.panel] = c.prompt || '';
+            }
+        } else if (field === 'trans') {
+            if (!Array.isArray(g.shotTransitions)) g.shotTransitions = ['', '', '', ''];
+            g.shotTransitions[c.panel] = c.shotTransition || '';
+        }
+        Storage.updateProject(this.projectId, { storyboardGroups: p.storyboardGroups });
+    },
+    // 立即冲刷所有挂起的同步定时器（关闭弹窗前调用，保证外部列表 render 时拿到的是最新值）
+    _flushClipSync() {
+        const timers = this._clipSyncTimers || {};
+        const pending = this._clipSyncPending || {};
+        Object.keys(timers).forEach(k => clearTimeout(timers[k]));
+        Object.keys(pending).forEach(k => {
+            const { c, field } = pending[k];
+            this._writeClipToStoryboard(c, field);
+        });
+        this._clipSyncTimers = {};
+        this._clipSyncPending = {};
     },
     // 编辑转场时长（秒）
     tlSetTransDur(uid, v) {
@@ -4092,6 +4113,7 @@ this._tl._audioUserSet = true;   // 标记用户手动设置过：之后切换�
         if (this._tl && this._tl._raf) cancelAnimationFrame(this._tl._raf);
         this._pauseAudio();
         this._stopVideoTimer();   // 仅停 UI 计时器；后台任务与轮询继续
+        this._flushClipSync();    // 先把挂起的提示词同步立即写盘，保证下面 render 拿到最新值
         this._tl = null; App.closeModal(); this.render(this.projectId);
     },
 
