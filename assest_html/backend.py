@@ -2199,8 +2199,8 @@ class Handler(BaseHTTPRequestHandler):
                 'guide_strength': d.get('guide_strength', '1.00'),
                 'use_custom_audio': d.get('use_custom_audio', None),
                 'fps': d.get('fps', 30),
-                # 选择导演台工作流：'singularity'(默认) | 'director'(旧 LTXDirector)
-                'workflow': (d.get('workflow') or 'singularity'),
+                # 选择导演台工作流：'director'(默认，旧 LTXDirector) | 'singularity'(乱神版 V3)
+                'workflow': (d.get('workflow') or 'director'),
             }
             has_new = bool(params.get('imageSegments')) or bool(params.get('audioSegments'))
             if not params['segments'] and not has_new:

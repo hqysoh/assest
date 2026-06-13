@@ -3095,8 +3095,8 @@ emotions: this._collectEmotions(),
             pxPerFrame: 1.4,                      // 缩放：像素/帧
             globalPrompt: first.globalPrompt || first.prompt || '',
             guideStrength: '1.00',                // 引导强度默认值（1.0=最大约束，最贴近引导图）
-            epsilon: 0.3,                         // 过渡柔和度（0.001 硬切 ~ 1.0 最柔）
-            workflow: 'singularity',              // 导演台工作流：'singularity'(默认，乱神版V3) | 'director'(旧 LTXDirector)
+                epsilon: 0.9,                         // 过渡柔和度（0.001 硬切 ~ 1.0 最柔，默认 0.9 转场更柔和）
+                workflow: 'director',                 // 导演台工作流：'director'(默认，旧 LTXDirector) | 'singularity'(乱神版V3)
                 // 使用音频：ON=用上传音频；OFF=让模型按提示词从零生成音频（含环境音）。
                 // 两个工作流（乱神版/旧导演台）均默认关闭（由模型从零生成音频）。
                 useCustomAudio: false,
@@ -3200,7 +3200,7 @@ emotions: this._collectEmotions(),
                     </span>
                     <span class="sb-dir-guide">
                         Epsilon
-                        <input type="number" id="tlEpsilon" min="0.001" max="1" step="0.001" value="${(tl.epsilon ?? 0.3)}"
+                        <input type="number" id="tlEpsilon" min="0.001" max="1" step="0.001" value="${(tl.epsilon ?? 0.9)}"
                             oninput="StoryboardModule.tlSetEpsilon(this.value)">
                     </span>
                     <span class="sb-dir-guide" title="使用音频：开启=使用你上传/添加的音频；关闭=不使用上传音频，由模型根据提示词从零生成整段音频（可含环境音/氛围，但人声质量较低）">
@@ -3214,8 +3214,8 @@ emotions: this._collectEmotions(),
                     <span class="sb-dir-guide sb-dir-selwrap">合成工作流
                         <span class="sb-dir-select">
                             <select id="tlWorkflow" onchange="StoryboardModule.tlSetWorkflow(this.value)">
-                                <option value="singularity" ${(tl.workflow || 'singularity') === 'singularity' ? 'selected' : ''}>Singularity 乱神版V3</option>
-                                <option value="director" ${tl.workflow === 'director' ? 'selected' : ''}>旧导演台 LTXDirector</option>
+<option value="director" ${(tl.workflow || 'director') === 'director' ? 'selected' : ''}>旧导演台 LTXDirector</option>
+                            <option value="singularity" ${tl.workflow === 'singularity' ? 'selected' : ''}>Singularity 乱神版V3</option>
                             </select>
                         </span>
                     </span>
@@ -3647,10 +3647,10 @@ tlSetUseAudio(checked) {
 this._tl.useCustomAudio = !!checked;
 this._tl._audioUserSet = true;   // 标记用户手动设置过：之后切换工作流不再自动覆盖
 },
-tlSetWorkflow(v) {
-// 导演台工作流选择：'singularity'(默认) | 'director'
-const tl = this._tl;
-        tl.workflow = (v === 'director') ? 'director' : 'singularity';
+    tlSetWorkflow(v) {
+        // 导演台工作流选择：'director'(默认) | 'singularity'
+        const tl = this._tl;
+        tl.workflow = (v === 'singularity') ? 'singularity' : 'director';
             // 「使用音频」两个工作流均默认关闭；仅当用户未手动改过该开关时才同步默认值，避免覆盖用户的显式选择。
             if (!tl._audioUserSet) {
                 tl.useCustomAudio = false;
@@ -4190,12 +4190,12 @@ const tl = this._tl;
                 audioSegments,
                 total_frames: total,
                 global_prompt: tl.globalPrompt || '',
-                epsilon: (this._tl.epsilon ?? 0.3),
+                epsilon: (this._tl.epsilon ?? 0.9),
                 guide_strength: tl.guideStrength || '1.00',
                 max_guide_strength: parseFloat(tl.guideStrength || '1.00'),   // 每段引导强度上限
                 use_custom_audio: (tl.useCustomAudio !== false) && audioSegments.length > 0,
                 fps: tl.fps,
-                workflow: tl.workflow || 'singularity',   // 导演台工作流：singularity(默认) | director
+                workflow: tl.workflow || 'director',   // 导演台工作流：director(默认) | singularity
             });
             if (!submit.success || !submit.task_id) throw new Error(submit.error || '提交失败');
             // 持久化任务：关弹窗 / 刷新后仍可恢复计时与轮询
