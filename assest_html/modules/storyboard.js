@@ -3097,9 +3097,9 @@ emotions: this._collectEmotions(),
             guideStrength: '1.00',                // 引导强度默认值（1.0=最大约束，最贴近引导图）
             epsilon: 0.3,                         // 过渡柔和度（0.001 硬切 ~ 1.0 最柔）
             workflow: 'singularity',              // 导演台工作流：'singularity'(默认，乱神版V3) | 'director'(旧 LTXDirector)
-            // 使用音频：ON=用上传音频；OFF=让模型按提示词从零生成音频（含环境音）。
-            // 两个工作流（乱神版/旧导演台）均默认勾选（用上传音频）。
-            useCustomAudio: true,
+                // 使用音频：ON=用上传音频；OFF=让模型按提示词从零生成音频（含环境音）。
+                // 两个工作流（乱神版/旧导演台）均默认关闭（由模型从零生成音频）。
+                useCustomAudio: false,
             selectedUid: (imageClips[0] && imageClips[0].uid) || null,  // 预览/编辑当前选中的图像段
             playFrame: 0, playing: false,
         };
@@ -3651,12 +3651,12 @@ tlSetWorkflow(v) {
 // 导演台工作流选择：'singularity'(默认) | 'director'
 const tl = this._tl;
         tl.workflow = (v === 'director') ? 'director' : 'singularity';
-        // 「使用音频」两个工作流均默认勾选；仅当用户未手动改过该开关时才同步默认值，避免覆盖用户的显式选择。
-        if (!tl._audioUserSet) {
-            tl.useCustomAudio = true;
-            const cb = document.getElementById('tlUseAudio');
-            if (cb) cb.checked = tl.useCustomAudio;
-}
+            // 「使用音频」两个工作流均默认关闭；仅当用户未手动改过该开关时才同步默认值，避免覆盖用户的显式选择。
+            if (!tl._audioUserSet) {
+                tl.useCustomAudio = false;
+                const cb = document.getElementById('tlUseAudio');
+                if (cb) cb.checked = tl.useCustomAudio;
+            }
 },
     tlSetFps(v) {
         // 切换帧率：按比例重算所有段的帧数，保持镜头「秒数」不变。
