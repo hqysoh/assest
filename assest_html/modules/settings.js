@@ -114,12 +114,22 @@ const SettingsModule = {
 
         <div class="settings-section">
             <h2 class="settings-section-title">🔊 语音生成</h2>
-            <div class="form-group">
-                <label class="form-label">默认朗读文本模板</label>
-                <input class="form-input" id="voiceTemplate" value="${this.esc(voice.textTemplate || '我是{name}，这是我的音色，很高兴认识你')}" placeholder="我是{name}，这是我的音色"
-                    onchange="SettingsModule.autoSaveVoice(this.value)">
-                <p class="form-hint">使用 <code>{name}</code> 作为人物姓名占位符。生成音频弹窗会以此为默认文本。</p>
+            <div class="form-row">
+                <div class="form-col">
+                    <label class="form-label">默认配音 / 语音克隆工作流（TTS）</label>
+                    <select class="form-input" id="ttsWorkflow" onchange="SettingsModule.saveCloneWorkflow(this.value)">
+                        <option value="vocpm" ${(voice.cloneWorkflow || 'vocpm') === 'vocpm' ? 'selected' : ''}>VoxCPM</option>
+                        <option value="qwen3" ${voice.cloneWorkflow === 'qwen3' ? 'selected' : ''}>Qwen3-TD-TTS</option>
+                        <option value="indextts" ${voice.cloneWorkflow === 'indextts' ? 'selected' : ''}>IndexTTS-2（情感）</option>
+                    </select>
+                </div>
+                <div class="form-col">
+                    <label class="form-label">默认朗读文本模板</label>
+                    <input class="form-input" id="voiceTemplate" value="${this.esc(voice.textTemplate || '我是{name}，这是我的音色，很高兴认识你')}" placeholder="我是{name}，这是我的音色"
+                        onchange="SettingsModule.autoSaveVoice(this.value)">
+                </div>
             </div>
+            <p class="form-hint">配音工作流：人物 / 分镜配音使用的 ComfyUI 工作流，VoxCPM 与 Qwen3-TD-TTS 音色风格略有差异，IndexTTS-2 支持情感维度；分镜页顶部下拉与此处同步。朗读文本模板用 <code>{name}</code> 作为人物姓名占位符。</p>
         </div>
 
         <div class="settings-section">
@@ -240,6 +250,15 @@ const SettingsModule = {
         const cloneWorkflow = (wf === 'qwen3') ? 'qwen3' : 'vocpm';
         const voiceSettings = { ...(s.voiceSettings || {}), cloneWorkflow };
         Storage.saveSettings({ voiceSettings });
+        this.flashSaved();
+    },
+
+    // 默认配音 / 语音克隆工作流（TTS）：支持 vocpm / qwen3 / indextts
+    saveCloneWorkflow(wf) {
+        const s = Storage.getSettings();
+        const allow = ['vocpm', 'qwen3', 'indextts'];
+        const cloneWorkflow = allow.includes(wf) ? wf : 'vocpm';
+        Storage.saveSettings({ voiceSettings: { ...(s.voiceSettings || {}), cloneWorkflow } });
         this.flashSaved();
     },
 

@@ -12,7 +12,6 @@ const StoryboardModule = {
     projectId: null,
     _polls: {},          // 内存中的四宫格轮询标记（fg_<gid> → taskId），仅用于 UI spinner
     _genGroups: null,    // 生成弹窗用的分组列表缓存
-    _nanoOpen: {},       // gid → bool：四宫格图像提示词是否展开
     _fgTimers: {},       // gid → 计时器 interval（四宫格生成 s 数显示）
     _fgStart: {},        // gid → 开始时间戳
     _audioTasks: {},     // 'gid:panel' → 开始时间戳（面板配音进行中）
@@ -58,7 +57,7 @@ const StoryboardModule = {
                 <div class="sb-toolbar-left">
                     ${genBtnHtml}
                     <button class="sb-compose-btn" onclick="StoryboardModule.openTimeline()" ${groups.length ? '' : 'disabled'} title="进入时间轴合成视频：将已勾选的分镜按图像/音频双轨对齐后生成成片"><span class="sb-compose-ic">🎞️</span><span>合成视频</span></button>
-                    <button class="btn-secondary sb-jump-sel" onclick="StoryboardModule.jumpToFirstSelected()" ${groups.length ? '' : 'disabled'} title="滚动定位到第一个『已勾选合成视频』的分镜并高亮">🎯 定位首个已选</button>
+                    <button class="btn-secondary sb-jump-sel" onclick="StoryboardModule.jumpToFirstSelected()" ${groups.length ? '' : 'disabled'} title="滚动定位到第一个『已勾选合成视频』的分镜并高亮">🎯 定位首选</button>
                     <button class="btn-secondary" onclick="StoryboardModule.importGroupsFromFile()" title="上传分镜 JSON（含 person / 分镜 字段，与智能生成的格式一致），也可直接把 .json 拖到下方区域">📥 上传 JSON</button>
                     <input type="file" id="sbImportJson" accept="application/json,.json" style="display:none" onchange="StoryboardModule.onImportJsonFile(event)">
                     <button class="btn-secondary" onclick="StoryboardModule.exportContextJson()" title="导出剧本 / 人物 / 道具 / 场景为 JSON，供另一台机器导入或生成分镜复用">📤 导出素材</button>
@@ -121,19 +120,18 @@ const StoryboardModule = {
         const allSelected = [0, 1, 2, 3].every(i => !(g.panelSelected && g.panelSelected[i] === false));
         const allMarked = [0, 1, 2, 3].every(i => !!(g.panelMarked && g.panelMarked[i]));
 
-        // 四宫格图像提示词（nano）：过长收缩，可展开；可就地编辑（失焦自动保存）
+        // 四宫格图像提示词（nano）：过长时提供「🔍 查看完整」点击弹窗显示全文；正文保持单行省略 + 可就地编辑（失焦自动保存）
         const nano = g.nanoPrompt || '';
-        const nanoOpen = !!this._nanoOpen[g.id];
         const nanoLong = nano.length > 90;
         const nanoRow = `
             <div class="meta-section">
                 <div class="meta-header">
                     <span class="meta-label">四宫格生成提示词</span>
-                    ${nanoLong ? `<button class="btn-ghost btn-tiny" onclick="StoryboardModule.toggleNano('${g.id}')">${nanoOpen ? '收起 ▴' : '展开 ▾'}</button>` : ''}
+                    ${nanoLong ? `<button class="btn-ghost btn-tiny" title="弹窗显示完整提示词内容" onclick="StoryboardModule.viewNanoFull('${g.id}')">🔍 查看完整</button>` : ''}
                 </div>
                 ${InlineEdit.field(nano, {
                     placeholder: '点击填写 NANO 提示词（@图1=…）',
-                    className: 'meta-content sb-nano clamp-1 ' + (nanoOpen ? 'expanded open' : ''),
+                    className: 'meta-content sb-nano clamp-1',
                     data: { edit: 'sb-group', gid: g.id, field: 'nanoPrompt' } })}
             </div>`;
 
@@ -1710,10 +1708,14 @@ emotions: this._collectEmotions(),
         return { groupCount: groups.length, shots };
     },
 
-    // 折叠/展开本组四宫格图像提示词（nano）
-    toggleNano(gid) {
-        this._nanoOpen[gid] = !this._nanoOpen[gid];
-        this.render(this.projectId);
+    // 点击「🔍 查看完整」：弹窗只读显示本组四宫格图像提示词（nano）的完整内容（不影响就地编辑）
+    viewNanoFull(gid) {
+        const p = Storage.getProject(this.projectId);
+        const g = (p.storyboardGroups || []).find(x => x.id === gid);
+        if (!g) return;
+        const text = (g.nanoPrompt || '').trim();
+        if (!text) { App.showToast('该组暂无四宫格生成提示词', 'info'); return; }
+        App.confirm({ title: '🎨 四宫格生成提示词', message: text, okText: '知道了', cancelText: '关闭' });
     },
 
     // ============================================================
@@ -1787,26 +1789,18 @@ emotions: this._collectEmotions(),
                     if (!prev) return '';
                     const disabled = !!g.prevLinkDisabled;
                     const prevStatus = prev.url
-                        ? `✅ 第${prev.groupNo}组末帧就绪`
-                        : `⚠️ 第${prev.groupNo}组尚无末帧`;
-                    // 取上一组最后一个面板的完整 localPrompt（用于写入默认衔接要求）
-                    let lastLocal = '';
-                    if (prev.groupNo) {
-                        const groups = (Storage.getProject(this.projectId).storyboardGroups || []);
-                        const pg = groups[prev.groupNo - 1];
-                        if (pg) {
-                            if (pg.single) { lastLocal = (pg.globalPrompt || pg.prompt || ''); }
-                            else { const lp = (pg.localPrompts || []); lastLocal = (lp[3] || lp[lp.length - 1] || ''); }
-                        }
-                    }
-                    // 默认衔接要求：带上上一组的 local_prompt，并说明由下游模型按四宫格要求自行决定是否参考
+                        ? `✅ 第${prev.groupNo}组四宫格就绪`
+                        : `⚠️ 第${prev.groupNo}组尚无四宫格`;
+                    // 取上一个四宫格的画面内容（nano_banana_prompt），用于写入默认衔接要求
+                    const lastLocal = this._prevGroupLastLocal(g);
+                    // 默认衔接要求：带上上一个四宫格的画面内容，并说明由下游模型按四宫格要求自行决定是否参考
                     const defaultNote = this._buildPrevLinkNote(lastLocal);
                     // textarea 默认值：用户编辑过则用其值，否则用默认衔接要求
                     const noteVal = (g.prevLinkNote != null && g.prevLinkNote !== '') ? g.prevLinkNote : defaultNote;
                     return `
                     <div class="form-group sb-fg-prev0 ${disabled ? 'sb-fg-prev0-disabled' : ''}" id="fgPrevLinkArea">
                         <div class="sb-fg-prev0-head">
-                            <span class="form-label">@图0 · 上一镜末帧 · 衔接要求（可编辑）</span>
+                            <span class="form-label">@图0 · 上一组四宫格 · 衔接要求（可编辑）</span>
                             <span class="sb-fg-prev0-st">${prevStatus}</span>
                             ${disabled ? '<span class="sb-fg-prev0-off">（已移除，不参与衔接）</span>' : ''}
                         </div>
@@ -1889,22 +1883,26 @@ emotions: this._collectEmotions(),
         Storage.updateProject(this.projectId, { storyboardGroups: p.storyboardGroups });
     },
 
-    // 构造默认衔接要求：带上一组的 local_prompt，并说明由下游模型按四宫格要求自行决定是否参考
+    // 构造默认衔接要求：带上一组四宫格的画面内容（nano_banana_prompt），并说明由下游模型按四宫格要求自行决定是否参考
     _buildPrevLinkNote(lastLocal) {
         const lp = (lastLocal || '').trim();
-        const lpPart = lp ? `上一个宫格画面内容为：${lp}。` : '';
-        return `@图0 是上一组镜头的最后一个画面（末帧）。${lpPart}请根据下方四宫格要求，自行决定是否参考 @图0：若需衔接，则让本组第 1 格在该画面基础上自然延续，保持人物外形与服装、人物在画面中所处的位置与朝向、场景环境、光线方向与明暗、整体色调，以及镜头视角与景别的连贯一致，使本组宫格之间以及与上一镜的过渡平滑流畅、无跳变、无穿帮。`;
+        const lpPart = lp ? `上一个四宫格画面内容为：${lp}。` : '';
+        return `@图0 是上一个四宫格的成品图。${lpPart}请根据下方四宫格要求，自行决定是否参考 @图0：若需衔接，则让本组第 1 格在上一个四宫格的画面基础上自然延续，保持人物外形与服装、人物在画面中所处的位置与朝向、场景环境、光线方向与明暗、整体色调，以及镜头视角与景别的连贯一致，使本组宫格之间以及与上一个四宫格的过渡平滑流畅、无跳变、无穿帮。`;
     },
 
-    // 取某组用于默认衔接要求的上一组 local_prompt 完整文本
+    // 取某组用于默认衔接要求的「上一个四宫格」画面内容：优先上一组四宫格提示词 nano_banana_prompt；
+    // 上一组若是单分镜，则回退其 globalPrompt / prompt。
     _prevGroupLastLocal(g) {
         const prev = this._prevGroupLastImage(g);
         if (!prev || !prev.groupNo) return '';
         const pg = (Storage.getProject(this.projectId).storyboardGroups || [])[prev.groupNo - 1];
         if (!pg) return '';
         if (pg.single) return (pg.globalPrompt || pg.prompt || '');
+        // 四宫格组：用整张四宫格的画面提示词
+        if (pg.nanoPrompt && pg.nanoPrompt.trim()) return pg.nanoPrompt.trim();
+        // 兜底：globalPrompt 或最后一个 local_prompt
         const lp = (pg.localPrompts || []);
-        return (lp[3] || lp[lp.length - 1] || '');
+        return (pg.globalPrompt || lp[3] || lp[lp.length - 1] || '');
     },
 
     _onFgGroupChange() {
@@ -1918,17 +1916,17 @@ emotions: this._collectEmotions(),
 
     _renderFgAssetRows(gid, assets) {
         const grid = assets.map(a => {
-            // 「上一镜末帧」衔接图：独立渲染（与人物/道具/场景区分），缺失时高亮提示
+            // 「上一组四宫格」衔接图：独立渲染（与人物/道具/场景区分），缺失时高亮提示
             if (a.prevLink) {
                 const thumb = a.url
-                    ? `<img src="${a.url}" alt="上一镜末帧">`
-                    : `<div class="sb-fg-ref-miss">上一组第${a.prevGroupNo || ''}组<br>尚无末帧图</div>`;
-                const acts = `<button class="btn-ghost btn-tiny" onclick="StoryboardModule._fgRemovePrevLink('${gid}')" title="不把上一镜末帧作为参考图（@图序号会自动顺延）">✕ 移除衔接</button>`;
+                    ? `<img src="${a.url}" alt="上一组四宫格">`
+                    : `<div class="sb-fg-ref-miss">上一组第${a.prevGroupNo || ''}组<br>尚无四宫格图</div>`;
+                const acts = `<button class="btn-ghost btn-tiny" onclick="StoryboardModule._fgRemovePrevLink('${gid}')" title="不把上一组四宫格作为参考图（@图序号会自动顺延）">✕ 移除衔接</button>`;
                 return `<div class="sb-fg-ref-cell is-prev ${a.missing ? 'is-miss' : ''}">
                     <div class="sb-fg-ref-idx">@图${a.idx}</div>
                     <div class="sb-fg-ref-thumb">${thumb}</div>
-                    <div class="sb-fg-ref-name" title="上一组的最后一个分镜画面，用于宫格间衔接">🔗 上一镜末帧</div>
-                    <div class="sb-fg-ref-type">${a.missing ? '<span style="color:var(--err)">⚠️ 缺末帧</span>' : '衔接 · 自动'}</div>
+                    <div class="sb-fg-ref-name" title="上一组的四宫格成品图，用于宫格间衔接">🔗 上一组四宫格</div>
+                    <div class="sb-fg-ref-type">${a.missing ? '<span style="color:var(--err)">⚠️ 缺四宫格</span>' : '衔接 · 自动'}</div>
                     <div class="sb-fg-ref-acts">${acts}</div>
                 </div>`;
             }
@@ -2099,26 +2097,26 @@ emotions: this._collectEmotions(),
         this.render(this.projectId);
     },
 
-    // 移除「上一镜末帧」衔接图（标记 prevLinkDisabled）：@图序号自动顺延
+        // 移除「上一组四宫格」衔接图（标记 prevLinkDisabled）：@图序号自动顺延
     _fgRemovePrevLink(gid) {
         const p = Storage.getProject(this.projectId);
         const g = (p.storyboardGroups || []).find(x => x.id === gid);
         if (!g) return;
         g.prevLinkDisabled = true;
         Storage.updateProject(this.projectId, { storyboardGroups: p.storyboardGroups });
-        App.showToast('已移除上一镜衔接，本组将不再以上一镜末帧作为 @图0', 'success');
+        App.showToast('已移除上一镜衔接，本组将不再以上一组四宫格作为 @图0', 'success');
         this._showFgConfigModal(gid);
         this.render(this.projectId);
     },
 
-    // 恢复「上一镜末帧」衔接图
+        // 恢复「上一组四宫格」衔接图
     _fgRestorePrevLink(gid) {
         const p = Storage.getProject(this.projectId);
         const g = (p.storyboardGroups || []).find(x => x.id === gid);
         if (!g) return;
         g.prevLinkDisabled = false;
         Storage.updateProject(this.projectId, { storyboardGroups: p.storyboardGroups });
-        App.showToast('已恢复上一镜衔接（@图0=上一镜末帧）', 'success');
+        App.showToast('已恢复上一镜衔接（@图0=上一组四宫格）', 'success');
         this._showFgConfigModal(gid);
         this.render(this.projectId);
     },
@@ -2205,12 +2203,12 @@ emotions: this._collectEmotions(),
         const checkAssets = this._collectRefAssets(g);
         const missing = checkAssets.filter(a => a.missing);
         if (missing.length) {
-            const names = missing.map(a => a.prevLink ? `@图${a.idx} 上一镜末帧（上一组尚未生成图）` : `@图${a.idx} ${a.name}`).join('、');
+            const names = missing.map(a => a.prevLink ? `@图${a.idx} 上一组四宫格（上一组尚未生成图）` : `@图${a.idx} ${a.name}`).join('、');
             const hasPrevMiss = missing.some(a => a.prevLink);
             const ok = await App.confirm({
                 title: '⚠️ 缺少参考图',
                 message: `还有 ${missing.length} 张参考图未就绪：\n${names}\n\n`
-                    + (hasPrevMiss ? '其中「上一镜末帧」缺失：请先生成上一组的四宫格（或上一个单分镜），否则本组将失去与上一镜的画面衔接。\n\n' : '')
+                    + (hasPrevMiss ? '其中「上一组四宫格」缺失：请先生成上一组的四宫格（或上一个单分镜），否则本组将失去与上一镜的画面衔接。\n\n' : '')
                     + '确定在缺少参考图的情况下继续生成吗？',
                 okText: '仍要生成',
                 cancelText: '去补齐',
@@ -2242,7 +2240,7 @@ emotions: this._collectEmotions(),
 
         this._updFgProgressText(gid, `参考图就绪（${refB64.length} 张）· 正在提交任务…`);
 
-        // 若启用了「上一镜末帧」衔接且该图确实传入（@图0 有图），在提示词最前拼接 @图0 衔接说明：
+        // 若启用了「上一组四宫格」衔接且该图确实传入（@图0 有图），在提示词最前拼接 @图0 衔接说明：
         //   优先使用用户在 @图0 区域编辑的 prevLinkNote（允许自定义）；
         //   为空时使用默认衔接要求；
         //   用户移除衔接（prevLinkDisabled）时不拼接任何内容（@图0 区域置灰）。
@@ -2483,14 +2481,14 @@ emotions: this._collectEmotions(),
                 if (prev) {
                     // prev.url 有图 → 正常衔接；无图 → 缺失占位，渲染时高亮提示
                     out.unshift({
-                        idx: 0, type: 'prev', name: '上一镜末帧',
+                        idx: 0, type: 'prev', name: '上一组四宫格',
                         item: null, mediaId: prev.mediaId || null, url: prev.url || '',
                         missing: !prev.url, prevLink: true,
                         prevGroupNo: prev.groupNo,
                     });
                 }
             }
-            // 重排 idx：上一镜末帧固定为 @图0（不占用 @图1 序号），其余参考图从 @图1 开始顺序编号。
+            // 重排 idx：上一组四宫格固定为 @图0（不占用 @图1 序号），其余参考图从 @图1 开始顺序编号。
             let n = 0;
             out.forEach((a) => { a.idx = a.prevLink ? 0 : (++n); });
             // 截断至 8 张（编辑接口上限）；末帧衔接图始终保留，普通参考图最多 8 张。
@@ -2532,8 +2530,8 @@ emotions: this._collectEmotions(),
         return finalize();
     },
 
-    // 定位「上一组的最后一个分镜图像」用于宫格间衔接（按 storyboardGroups 数组顺序取当前组之前最近的一组）：
-    //   · 上一组是四宫格 → 取第 4 个 panel 的切分图（panelImages[3]）；缺则回退整张四宫格图（fourGridImageId）
+    // 定位「上一组的四宫格成品图」用于宫格间衔接（按 storyboardGroups 数组顺序取当前组之前最近的一组）：
+    //   · 上一组是四宫格 → 取整张四宫格成品图（fourGridImageId）；缺则回退第 4 个 panel 切分图（panelImages[3]）
     //   · 上一组是单分镜 → 取其 imageId
     // 返回 { url, mediaId, groupNo } —— 找不到上一组返回 null；上一组存在但未生成图返回 { url:'' } 以便缺失提示。
     _prevGroupLastImage(g) {
@@ -2547,8 +2545,9 @@ emotions: this._collectEmotions(),
         if (prev.single) {
             mediaId = prev.imageId != null ? prev.imageId : null;
         } else {
+            // 优先整张四宫格成品图；缺失才回退第 4 个 panel 切分图
             const panels = prev.panelImages || [];
-            mediaId = panels[3] != null ? panels[3] : (prev.fourGridImageId != null ? prev.fourGridImageId : null);
+            mediaId = prev.fourGridImageId != null ? prev.fourGridImageId : (panels[3] != null ? panels[3] : null);
         }
         if (mediaId == null) return { url: '', mediaId: null, groupNo };
         const m = Storage.getMediaById(this.projectId, mediaId);

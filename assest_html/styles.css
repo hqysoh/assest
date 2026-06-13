@@ -1124,7 +1124,7 @@ border:1px solid var(--bd);border-radius:9px;padding:0.55rem 0.7rem;background:v
     max-height:none !important;
     height:auto !important;
 }
-/* 长内容旁的"展开 ▾ / 收起 ▴"角标：当 clamp-1 框被点击展开后 toggleNano 也保持展开 */
+/* clamp-1 行内编辑框的占位伪元素（长内容通过旁边「🔍 查看完整」按钮弹窗显示全文） */
 .inline-edit.clamp-1::after{
     content:'';
 }
