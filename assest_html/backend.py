@@ -1377,21 +1377,10 @@ def run_director_singularity_sync(params, task_id=None):
         elif ct == 'PrimitiveInt' and (node.get('_meta', {}) or {}).get('title', '').lower().startswith('stage'):
             node['inputs']['value'] = random.randint(1, 2**31)
 
-    # 旁路采样实时预览节点：LTX2SamplingPreviewOverride 在采样时会向「网页前端会话」推预览图，
-    # 但我们是经 /api/prompt 后端提交、无前端会话，serv.last_node_id 为 None 会崩
-    # （AttributeError: 'NoneType' object has no attribute 'encode'）。
-    # 做法：把所有「引用该预览节点输出」的输入改接到它的上游 model，使其不被消费而被剪枝。
-    preview_ids = [pid for pid, n in workflow.items()
-                   if n.get('class_type') == 'LTX2SamplingPreviewOverride']
-    for pid in preview_ids:
-        upstream = workflow[pid].get('inputs', {}).get('model')   # 形如 ["1", 0]
-        if not (isinstance(upstream, list) and len(upstream) == 2):
-            continue
-        for n in workflow.values():
-            ins = n.get('inputs', {})
-            for k, v in list(ins.items()):
-                if isinstance(v, list) and len(v) == 2 and v[0] == pid:
-                    ins[k] = list(upstream)
+    # 注：原先这里有一段对 LTX2SamplingPreviewOverride（采样实时预览节点）的剪枝逻辑——
+    # 因后端经 /api/prompt 提交、无前端会话，该节点推预览会崩。现工作流已在 ComfyUI 里
+    # 用 Ctrl+B（bypass）摘掉该节点并重新导出，JSON 中已不含此节点，故剪枝代码已删除。
+    # 若将来换回带该节点的工作流，请在 ComfyUI 里 bypass 后再导出，不要在后端硬剪（易错接上游导致尾部花屏）。
 
     try:
         try:
