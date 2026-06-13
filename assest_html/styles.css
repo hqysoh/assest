@@ -749,6 +749,17 @@ input[type="checkbox"]{accent-color:var(--ac)}
 .sb-fg-prev0-off{font-size:0.72rem;color:var(--t3);font-weight:400;margin-left:0.25rem;font-style:italic}
 .sb-fg-prev0-lp{font-size:0.7rem;color:var(--t2);background:var(--bg2);border-radius:5px;padding:3px 6px;margin-top:2px;border-left:2px solid var(--bd);line-height:1.35;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;max-height:4.8em}
 .sb-fg-prev0-ta{font-size:0.82rem;line-height:1.45;resize:vertical;color:var(--t1)}
+/* 四宫格生成提示词（nano）：默认只读高亮层（面板X 深红加粗），点击切换为可编辑 textarea（自动展开） */
+.sb-nano-box{position:relative}
+.sb-nano-view{min-height:120px;max-height:240px;overflow:auto;padding:0.7rem 0.9rem;background:var(--bg3);
+    border:1.5px solid var(--bd);border-radius:11px;color:var(--t);font-size:0.85rem;line-height:1.7;
+    white-space:pre-wrap;word-break:break-word;cursor:text;transition:border-color .2s;box-shadow:inset 0 1px 3px rgba(0,0,0,.08)}
+.sb-nano-view:hover{border-color:var(--ac)}
+.sb-nano-empty{color:var(--t3);opacity:.6}
+/* 面板X 高亮：加粗深红色（深色主题用更亮的红以保证可读，浅色主题用深红） */
+.sb-nano-panel{color:#ef4444;font-weight:800}
+[data-theme="light"] .sb-nano-panel{color:#b91c1c}
+.sb-nano-ta{min-height:120px;max-height:360px;overflow:auto;resize:vertical}
 /* 参考图单元的操作按钮区（选图/上传/更换/清除/删除） */
 .sb-fg-ref-acts{display:flex;flex-wrap:wrap;gap:0.25rem;justify-content:center;margin-top:0.1rem}
 .sb-fg-ref-acts .btn-tiny{padding:0.12rem 0.4rem;font-size:0.62rem}

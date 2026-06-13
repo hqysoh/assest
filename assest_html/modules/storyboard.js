@@ -1703,6 +1703,48 @@ emotions: this._collectEmotions(),
         App.confirm({ title: '🎨 四宫格生成提示词', message: text, okText: '知道了', cancelText: '关闭' });
     },
 
+    // 把文本里的「面板X / 面板XX」高亮为加粗深红（先 HTML 转义再包裹，避免 XSS / 标签注入）
+    _highlightPanels(text) {
+        const esc = this.esc((text || ''));
+        // 匹配「面板」后跟 1~2 位数字（如 面板1、面板12）；保留换行展示
+        return esc
+            .replace(/面板\s*\d{1,2}/g, m => `<span class="sb-nano-panel">${m}</span>`)
+            .replace(/\n/g, '<br>');
+    },
+
+    // 点击只读高亮层 → 切换为可编辑 textarea（自动展开高度），聚焦
+    _fgNanoEdit() {
+        const view = document.getElementById('fgNanoView');
+        const ta = document.getElementById('fgPrompt');
+        if (!view || !ta) return;
+        view.style.display = 'none';
+        ta.style.display = 'block';
+        this._fgNanoAutoGrow(ta);
+        ta.focus();
+        // 光标移到末尾
+        try { const n = ta.value.length; ta.setSelectionRange(n, n); } catch (e) {}
+    },
+
+    // textarea 失焦 → 保存并切回只读高亮层（重渲染高亮内容）
+    _fgNanoBlur(gid) {
+        const view = document.getElementById('fgNanoView');
+        const ta = document.getElementById('fgPrompt');
+        if (!view || !ta) return;
+        // 保存（_saveFgPrompt 内部会判断是否变化）
+        this._saveFgPrompt(gid, ta.value);
+        const val = ta.value || '';
+        view.innerHTML = this._highlightPanels(val) || '<span class="sb-nano-empty">点击填写四宫格生成提示词…</span>';
+        ta.style.display = 'none';
+        view.style.display = 'block';
+    },
+
+    // textarea 输入时自动撑高（最高 360px 后内部滚动）
+    _fgNanoAutoGrow(ta) {
+        if (!ta) return;
+        ta.style.height = 'auto';
+        ta.style.height = Math.min(ta.scrollHeight + 2, 360) + 'px';
+    },
+
     // ============================================================
     // ② 生成四宫格（gpt-image-2 编辑，多参考图）
     //    入口：弹出"生成配置弹窗"——
@@ -1798,12 +1840,20 @@ emotions: this._collectEmotions(),
                 })()}
 
                 <div class="form-group">
-                    <div class="meta-header">
-                        <label class="form-label" style="margin:0">四宫格生成提示词（nano，可改）</label>
-                        <button class="btn-ghost btn-tiny" onclick="StoryboardModule.viewNanoFull('${gid}')" title="弹窗只读显示完整提示词内容">🔍 查看完整</button>
-                    </div>
-                    <textarea class="form-textarea" id="fgPrompt" style="min-height:120px;max-height:200px;overflow:auto" onchange="StoryboardModule._saveFgPrompt('${gid}', this.value)">${this.esc(g.nanoPrompt || g.globalPrompt || '')}</textarea>
-                    <p class="form-hint" style="margin-top:0.3rem">提示词开头应按 <b>@图1=…、@图2=…</b> 顺序声明参考图，下方列表的索引就是接口收到的顺序（@图0 为额外衔接图，不占此序号）。文字过长时可点「🔍 查看完整」弹窗查看。</p>
+                    <label class="form-label">四宫格生成提示词（nano，可改）</label>
+                    ${(() => {
+                        const val = g.nanoPrompt || g.globalPrompt || '';
+                        return `
+                        <div class="sb-nano-box" id="fgNanoBox">
+                            <div class="sb-nano-view" id="fgNanoView" title="点击编辑提示词"
+                                onclick="StoryboardModule._fgNanoEdit()">${this._highlightPanels(val) || '<span class="sb-nano-empty">点击填写四宫格生成提示词…</span>'}</div>
+                            <textarea class="form-textarea sb-nano-ta" id="fgPrompt" style="display:none"
+                                onblur="StoryboardModule._fgNanoBlur('${gid}')"
+                                oninput="StoryboardModule._fgNanoAutoGrow(this)"
+                                onchange="StoryboardModule._saveFgPrompt('${gid}', this.value)">${this.esc(val)}</textarea>
+                        </div>`;
+                    })()}
+                    <p class="form-hint" style="margin-top:0.3rem">提示词开头应按 <b>@图1=…、@图2=…</b> 顺序声明参考图，下方列表的索引就是接口收到的顺序（@图0 为额外衔接图，不占此序号）。<b style="color:var(--err)">面板X</b> 会高亮标出；点击文本框即可编辑、自动展开完整内容。</p>
                 </div>
                 <div class="form-group">
                     <div class="meta-header">
