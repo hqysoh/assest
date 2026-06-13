@@ -69,6 +69,7 @@ const StoryboardModule = {
                         <select onchange="StoryboardModule.setCloneWorkflow(this.value)">
                             <option value="vocpm" ${((Storage.getSettings().voiceSettings || {}).cloneWorkflow || 'vocpm') === 'vocpm' ? 'selected' : ''}>VoxCPM</option>
                             <option value="qwen3" ${(Storage.getSettings().voiceSettings || {}).cloneWorkflow === 'qwen3' ? 'selected' : ''}>Qwen3-TD-TTS</option>
+                            <option value="indextts" ${(Storage.getSettings().voiceSettings || {}).cloneWorkflow === 'indextts' ? 'selected' : ''}>IndexTTS-2（情感）</option>
                         </select>
                     </label>
                 </div>
@@ -845,6 +846,7 @@ const StoryboardModule = {
                     ${refUrl ? `<audio controls preload="none" src="${refUrl}"></audio>` : '<span class="sb-audio-ref-miss">尚未选择参考音色</span>'}
                     <button class="btn-ghost btn-tiny" onclick="StoryboardModule.pickRefAudio('${gid}')">选参考音色</button>
                 </div>
+                ${this._emotionPanelHtml('ss')}
                 ${curUrl ? `<div class="sb-audio-ref"><span class="sb-audio-ref-label">当前配音</span><audio controls preload="none" src="${curUrl}"></audio>${App.audioDragHandle(curUrl, `分镜配音_${gid}.${((curAud && curAud.mime) || '').includes('mpeg') ? 'mp3' : ((curAud && curAud.mime) || '').includes('flac') ? 'flac' : 'wav'}`, '拖出')}</div>` : ''}
                 <div id="ssResult" style="margin-top:0.6rem"></div>
             </div>
@@ -883,6 +885,7 @@ const submit = await API.post('/api/storyboard/tts_clone', {
 ref_audio_b64: refB64, ref_audio_mime: refAud.mime || 'audio/wav',
 text: text.trim(), ref_text: tone.trim(),
 workflow: (Storage.getSettings().voiceSettings || {}).cloneWorkflow || 'vocpm',
+emotions: this._collectEmotions(),
 });
             if (!submit.success || !submit.task_id) throw new Error(submit.error || '提交失败');
             const result = await this._pollTask(submit.task_id, null, 1200);
@@ -1378,9 +1381,84 @@ workflow: (Storage.getSettings().voiceSettings || {}).cloneWorkflow || 'vocpm',
     // 🎙️ 语音克隆工作流选择：保存到全局设置，人物/分镜配音时读取
     setCloneWorkflow(wf) {
         const s = Storage.getSettings();
-        const cloneWorkflow = (wf === 'qwen3') ? 'qwen3' : 'vocpm';
+        const allow = ['vocpm', 'qwen3', 'indextts'];
+        const cloneWorkflow = allow.includes(wf) ? wf : 'vocpm';
         Storage.saveSettings({ voiceSettings: { ...(s.voiceSettings || {}), cloneWorkflow } });
-        if (window.App && App.showToast) App.showToast(`语音克隆工作流已切换为 ${cloneWorkflow === 'qwen3' ? 'Qwen3-TD-TTS' : 'VoxCPM'}`);
+        const label = { vocpm: 'VoxCPM', qwen3: 'Qwen3-TD-TTS', indextts: 'IndexTTS-2（情感）' }[cloneWorkflow];
+        if (window.App && App.showToast) App.showToast(`语音克隆工作流已切换为 ${label}`);
+    },
+
+    // IndexTTS-2 情感配置：8 维（与后端 INDEXTTS_EMOTION_KEYS 一致），范围 0~1.4
+    _indexttsEmotions: { Happy: 0, Angry: 0, Sad: 0, Fear: 0, Hate: 0, Low: 0, Surprise: 0, Neutral: 0 },
+    _indexttsEmotionMeta: [
+        { key: 'Happy', label: '😄 高兴' },
+        { key: 'Angry', label: '😠 愤怒' },
+        { key: 'Sad', label: '😢 悲伤' },
+        { key: 'Fear', label: '😱 恐惧' },
+        { key: 'Hate', label: '😤 厌恶' },
+        { key: 'Low', label: '😔 低落' },
+        { key: 'Surprise', label: '😲 惊讶' },
+        { key: 'Neutral', label: '😐 平静' },
+    ],
+
+    // 是否当前使用 IndexTTS-2 工作流（决定配音弹窗是否显示情感滑块）
+    _isIndexTTS() {
+        return ((Storage.getSettings().voiceSettings || {}).cloneWorkflow || 'vocpm') === 'indextts';
+    },
+
+    // 生成情感滑块面板 HTML（仅 IndexTTS-2 显示）。inputId 前缀避免多弹窗冲突。
+    _emotionPanelHtml(prefix) {
+        if (!this._isIndexTTS()) return '';
+        const cur = this._indexttsEmotions || {};
+        const rows = this._indexttsEmotionMeta.map(m => {
+            const v = Math.max(0, Math.min(1.4, Number(cur[m.key]) || 0));
+            return `<div class="sb-emo-row">
+                <span class="sb-emo-label">${m.label}</span>
+                <input type="range" class="sb-emo-slider" min="0" max="1.4" step="0.05" value="${v}"
+                    oninput="StoryboardModule.onEmotionInput('${m.key}', this.value, '${prefix}')">
+                <input type="number" class="sb-emo-num" id="${prefix}_emo_${m.key}" min="0" max="1.4" step="0.05" value="${v}"
+                    oninput="StoryboardModule.onEmotionInput('${m.key}', this.value, '${prefix}')">
+            </div>`;
+        }).join('');
+        return `<div class="sb-emo-panel">
+            <div class="sb-emo-title">🎭 情感调节 <span class="sb-emo-hint">0~1.4，可多选混合；全 0 时为参考音频自带情感</span>
+                <button type="button" class="sb-emo-reset" onclick="StoryboardModule.resetEmotions('${prefix}')">清零</button>
+            </div>
+            <div class="sb-emo-grid">${rows}</div>
+        </div>`;
+    },
+
+    // 情感滑块/输入框联动：同步另一个控件 + 内存状态
+    onEmotionInput(key, val, prefix) {
+        let v = Number(val);
+        if (!isFinite(v)) v = 0;
+        v = Math.max(0, Math.min(1.4, v));
+        this._indexttsEmotions[key] = v;
+        // 同步同行的 slider / number
+        const num = document.getElementById(`${prefix}_emo_${key}`);
+        if (num && num.value !== String(v)) num.value = v;
+        const panel = num && num.closest('.sb-emo-row');
+        if (panel) {
+            const slider = panel.querySelector('.sb-emo-slider');
+            if (slider && Number(slider.value) !== v) slider.value = v;
+        }
+    },
+
+    resetEmotions(prefix) {
+        Object.keys(this._indexttsEmotions).forEach(k => { this._indexttsEmotions[k] = 0; });
+        this._indexttsEmotionMeta.forEach(m => {
+            const num = document.getElementById(`${prefix}_emo_${m.key}`);
+            if (num) num.value = 0;
+            const row = num && num.closest('.sb-emo-row');
+            const slider = row && row.querySelector('.sb-emo-slider');
+            if (slider) slider.value = 0;
+        });
+    },
+
+    // 取当前情感向量副本（提交时携带；非 IndexTTS-2 返回 undefined 不占用 payload）
+    _collectEmotions() {
+        if (!this._isIndexTTS()) return undefined;
+        return { ...this._indexttsEmotions };
     },
 
     // 📥 上传 JSON：触发隐藏的文件选择框
@@ -2553,6 +2631,7 @@ const submit = await API.post('/api/storyboard/tts_clone', {
 ref_audio_b64: refB64, ref_audio_mime: refMime,
 text: dialogue.text, ref_text: dialogue.tone || '',
 workflow: (Storage.getSettings().voiceSettings || {}).cloneWorkflow || 'vocpm',
+emotions: this._collectEmotions(),
 });
             if (!submit.success || !submit.task_id) throw new Error(submit.error || '提交失败');
             const result = await this._pollTask(submit.task_id, null, 1200);
@@ -2622,6 +2701,7 @@ workflow: (Storage.getSettings().voiceSettings || {}).cloneWorkflow || 'vocpm',
                             ? `<span class="sb-audio-ref-miss">⚠️ 该人物尚无音色，请先到人物页生成音频</span>`
                             : `<span class="sb-audio-ref-miss">请先选择说话人</span>`)}
                 </div>
+                ${this._emotionPanelHtml('sa')}
                 ${curUrl ? `<div class="sb-audio-ref"><span class="sb-audio-ref-label">当前配音</span><audio controls preload="none" src="${curUrl}"></audio>${App.audioDragHandle(curUrl, `分镜配音_${gid}_${panelIdx}.${((curAud && curAud.mime) || '').includes('mpeg') ? 'mp3' : ((curAud && curAud.mime) || '').includes('flac') ? 'flac' : 'wav'}`, '拖出')}</div>` : ''}
                 <div id="saResult" style="margin-top:0.6rem"></div>
                 ${histList.length >= 1 ? `
@@ -2761,6 +2841,7 @@ const submit = await API.post('/api/storyboard/tts_clone', {
 ref_audio_b64: refB64, ref_audio_mime: refMime,
 text, ref_text: tone,
 workflow: (Storage.getSettings().voiceSettings || {}).cloneWorkflow || 'vocpm',
+emotions: this._collectEmotions(),
 });
             if (!submit.success || !submit.task_id) throw new Error(submit.error || '提交失败');
             const result = await this._pollTask(submit.task_id, null, 1200);

@@ -694,6 +694,18 @@ input[type="checkbox"]{accent-color:var(--ac)}
 .sb-audio-ref-label{font-size:0.7rem;font-weight:700;color:var(--ac2);flex-shrink:0}
 .sb-audio-ref audio{flex:1;height:32px;max-width:100%}
 .sb-audio-ref-miss{font-size:0.72rem;color:var(--warn)}
+/* IndexTTS-2 情感调节面板 */
+.sb-emo-panel{margin-top:0.6rem;background:var(--bg3);border:1px solid var(--bd);border-radius:10px;padding:0.6rem 0.75rem}
+.sb-emo-title{display:flex;align-items:center;gap:0.5rem;font-size:0.78rem;font-weight:700;color:var(--ac2);margin-bottom:0.5rem}
+.sb-emo-hint{font-size:0.66rem;font-weight:400;color:var(--t3)}
+.sb-emo-reset{margin-left:auto;font-size:0.68rem;color:var(--t2);background:var(--bg2);border:1px solid var(--bd);border-radius:6px;padding:0.15rem 0.5rem;cursor:pointer}
+.sb-emo-reset:hover{color:var(--t1);border-color:var(--ac2)}
+.sb-emo-grid{display:grid;grid-template-columns:1fr 1fr;gap:0.35rem 0.9rem}
+.sb-emo-row{display:flex;align-items:center;gap:0.5rem}
+.sb-emo-label{font-size:0.72rem;color:var(--t1);width:3.6em;flex-shrink:0}
+.sb-emo-slider{flex:1;height:4px;accent-color:var(--ac2);cursor:pointer}
+.sb-emo-num{width:3.2em;flex-shrink:0;font-size:0.72rem;text-align:center;background:var(--bg2);color:var(--t1);border:1px solid var(--bd);border-radius:6px;padding:0.12rem 0.2rem}
+@media (max-width:560px){.sb-emo-grid{grid-template-columns:1fr}}
 .sb-audio-hist-block{margin-top:0.8rem;background:var(--bg3);border:1px solid var(--bd);border-radius:8px;padding:0.4rem 0.6rem}
 .sb-audio-hist-block summary{cursor:pointer;font-size:0.78rem;font-weight:700;color:var(--t1);padding:0.2rem 0}
 .sb-audio-hist-block .audio-history-list{margin-top:0.4rem}

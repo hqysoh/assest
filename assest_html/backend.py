@@ -52,11 +52,19 @@ DIRECTOR_SINGULARITY_WORKFLOW_PATH = os.path.join(os.path.dirname(__file__), "..
 TTS_CLONE_WORKFLOW_PATH = os.path.join(os.path.dirname(__file__), "..", "workflow-api", "vocpm语音克隆.json")
 # Qwen3-TD-TTS 语音克隆工作流（备选，TDQwen3TTSVoiceClone 节点）
 TTS_CLONE_QWEN3_WORKFLOW_PATH = os.path.join(os.path.dirname(__file__), "..", "workflow-api", "Qwen3-TD-TTS语音克隆.json")
+# IndexTTS-2 语音克隆工作流（带情感参考，easy indexTTSEmotionVector / easy indexTTSGenerate 节点）
+TTS_CLONE_INDEXTTS_WORKFLOW_PATH = os.path.join(os.path.dirname(__file__), "..", "workflow-api", "index-TTS2语音克隆+情感参考.json")
 # 语音克隆工作流可选项：key → 文件路径（前端在设置中选择，默认 vocpm）
 TTS_CLONE_WORKFLOWS = {
     'vocpm': TTS_CLONE_WORKFLOW_PATH,
     'qwen3': TTS_CLONE_QWEN3_WORKFLOW_PATH,
+    'indextts': TTS_CLONE_INDEXTTS_WORKFLOW_PATH,
 }
+
+# IndexTTS-2 情感分数取值范围（节点 easy indexTTSEmotionVector）：0 ~ 1.4
+INDEXTTS_EMOTION_KEYS = ['Happy', 'Angry', 'Sad', 'Fear', 'Hate', 'Low', 'Surprise', 'Neutral']
+INDEXTTS_EMOTION_MIN = 0.0
+INDEXTTS_EMOTION_MAX = 1.4
 
 
 def _new_task_id(prefix):
@@ -1097,7 +1105,8 @@ def comfy_output_abspath(filename, subfolder='', ftype='output'):
 def run_tts_clone_sync(params):
     """语音克隆：上传参考音频 → 运行所选克隆工作流 → 返回 base64 音频。
     params: { ref_audio_b64, ref_audio_mime, text, ref_text(语气/参考文本),
-              workflow: 'vocpm'(默认,VoxCPM) | 'qwen3'(Qwen3-TD-TTS) }"""
+              workflow: 'vocpm'(默认,VoxCPM) | 'qwen3'(Qwen3-TD-TTS) | 'indextts'(IndexTTS-2,带情感),
+              emotions: {Happy/Angry/Sad/Fear/Hate/Low/Surprise/Neutral: 0~1.4}(仅 indextts) }"""
     wf_key = (params.get('workflow') or 'vocpm').strip().lower()
     wf_path = TTS_CLONE_WORKFLOWS.get(wf_key, TTS_CLONE_WORKFLOW_PATH)
     if not os.path.exists(wf_path):
@@ -1144,6 +1153,25 @@ def run_tts_clone_sync(params):
             node['inputs']['ref_text'] = (params.get('ref_text') or '').strip()
             if 'seed' in node['inputs']:
                 node['inputs']['seed'] = rseed
+        elif ct == 'easy indexTTSGenerate':
+            # IndexTTS-2：台词写入 text
+            node['inputs']['text'] = params.get('text', '')
+            if 'seed' in node['inputs']:
+                node['inputs']['seed'] = rseed
+        elif ct == 'easy indexTTSEmotionVector':
+            # IndexTTS-2：8 维情感分数（0~1.4）。前端传 emotions={Happy:..,Angry:..,..}，
+            # 缺省置 0；参考音色由通用 LoadAudio 分支注入（本节点 reference_audio 引用 LoadAudio 输出）。
+            emo = params.get('emotions') or {}
+            for k in INDEXTTS_EMOTION_KEYS:
+                try:
+                    v = float(emo.get(k, 0) or 0)
+                except (TypeError, ValueError):
+                    v = 0.0
+                v = max(INDEXTTS_EMOTION_MIN, min(INDEXTTS_EMOTION_MAX, v))
+                node['inputs'][k] = v
+            # 有显式情感时不使用随机情感
+            if 'use_random' in node['inputs']:
+                node['inputs']['use_random'] = False
 
     # 3. 运行并取回音频
     try:
@@ -2143,7 +2171,8 @@ class Handler(BaseHTTPRequestHandler):
                 'ref_audio_mime': d.get('ref_audio_mime', 'audio/wav'),
                 'text': d.get('text', ''),
                 'ref_text': d.get('ref_text', ''),   # 语气/参考文本
-                'workflow': (d.get('workflow') or 'vocpm'),   # 语音克隆工作流：vocpm(默认) | qwen3
+                'workflow': (d.get('workflow') or 'vocpm'),   # 语音克隆工作流：vocpm(默认) | qwen3 | indextts
+                'emotions': d.get('emotions') or {},   # IndexTTS-2 情感向量 {Happy/Angry/...: 0~1.4}
             }
             if not params['text']:
                 self.send_json({'success': False, 'error': '缺少台词文本'}, 400); return
