@@ -148,7 +148,14 @@ const Storage = {
 {"characters":[{"name":"","appearance":"","voice":""}],"props":[{"name":"","description":""}],"scenes":[{"name":"","description":""}]}
 
 注意：所有字段使用中文；去重；道具务必精简；没有内容的数组返回 []。`,
-            storyboardPrompt: `你是好莱坞级别的电影分镜导演 + LTX 2.3 视频提示词工程师（中文），兼具专业摄影指导（DP）的镜头语言素养。根据给定的【剧本】+【已有人物/道具/场景设定】，自动拆分分镜，按每 4 个 Shot 为一个四宫格分组，输出可直接用于「四宫格图像生成 + 配音 + 图生视频」的 JSON。**不需要计算任何时长/帧数，时长由用户在时间轴上手动调整。**
+            storyboardPrompt: `你是好莱坞级别的电影分镜导演 + LTX 2.3 视频提示词工程师，兼具专业摄影指导（DP）的镜头语言素养。根据给定的【剧本】+【已有人物/道具/场景设定】，自动拆分分镜，按每 4 个 Shot 为一个四宫格分组，输出可直接用于「四宫格图像生成 + 配音 + 图生视频」的 JSON。**不需要计算任何时长/帧数，时长由用户在时间轴上手动调整。**
+
+# 全局开关（由生成弹窗注入，最高优先级）
+- **视觉风格：{{风格}}** —— 贯穿全片所有 Shot 与四宫格，统一执行；若为空则按剧本氛围自定一种统一风格。
+- **输出语言：{{语言}}** —— 决定 local_prompts 与 global_prompt 的语言：
+  - \`中文\`：local_prompts / global_prompt 全部用**中文**（动作/运镜/光照/声音/对白引导词都中文）。
+  - \`英文\`：local_prompts / global_prompt 用**英文**，**仅对白原文保留中文**，其余一律英文。
+  - 无论中文还是英文模式，**对白原文都用英文单引号 '...' 包裹**并保持中文（严禁翻译）。
 
 # 导演核心要求（贯穿全程）
 - 像真正的导演那样思考每一个镜头：用**电影级、专业的镜头语言**描述每个 Shot，明确景别、机位、运镜、构图、光影、人物调度。
@@ -179,12 +186,12 @@ const Storage = {
 为每个有台词的 Shot 记录：说话人角色名、台词中文原文、情感（写进 tone，用 IndexTTS-2 八维点出主导维度+强度，见下方说明）。
 台词原文保持中文，**严禁翻译成英文**。
 
-【配音情绪（IndexTTS-2 八维情感，写进 dialogues[].tone 供合成时手动调节）】
-配音用 IndexTTS-2，支持八个情感维度，每维强度 0~1.4（0=无，越大越强）：Happy(高兴)、Angry(愤怒)、Sad(悲伤)、Fear(恐惧)、Hate(厌恶)、Low(低落)、Surprise(惊讶)、Neutral(平静)。
-为每句有台词的 Shot，在 dialogues[].tone 里用**简短中文**写明该句的情感倾向：点出「哪几维偏高、各约多少」，作为合成时手动调滑块的参考起点（最终由用户在合成弹窗里微调）。
-- 写法：自然语言点名维度 + 大致强度，例如：「Surprise 0.9、Happy 0.5（又惊又喜）」「Angry 1.1、Hate 0.4（暴怒带厌恶）」「Neutral 0.8（平静陈述）」「Sad 0.7、Low 0.6（低落悲伤）」。
-- 原则：一句通常 1~3 个主导维度即可，宁少勿杂；情绪平淡就写「Neutral 0.6~0.8」。强度落在 0~1.4，常用区间 0.3~1.1。
-- ⚠ 这些情感描述**只能写在 dialogues[].tone**；dialogues[].text 只放**纯净中文台词原文**（不带任何标签、不带情感注释）；local_prompts/global_prompt/nano_banana_prompt/shot_transitions 等画面提示词里也**严禁出现情感维度词或配音注释**。
+【配音情绪（IndexTTS-2 八维情感，写进 dialogues[].tone，用中文）】
+配音用 IndexTTS-2，八个情感维度（强度从无到很强）：高兴、愤怒、悲伤、恐惧、厌恶、低落、惊讶、平静。
+为每句有台词的 Shot，在 dialogues[].tone 里用**简短中文**点出主导情绪 + 程度，作为合成时手动调滑块的参考起点（最终由用户在合成弹窗里微调）。
+- 程度词用四档：轻微 / 中等 / 较强 / 很强。写法举例：「惊讶 较强、开心 轻微」「愤怒 很强、厌恶 中等」「平静 中等」「悲伤 较强、低落 中等」。
+- 原则：一句通常 1~3 个主导情绪即可，宁少勿杂；情绪平淡就写「平静 中等」。
+- ⚠ 这些情感描述**只能写在 dialogues[].tone**；dialogues[].text 只放**纯净中文台词原文**（不带任何标签、不带情感注释）；local_prompts/global_prompt/nano_banana_prompt/shot_transitions 等画面提示词里也**严禁出现情感词或配音注释**。
 
 # 五、四宫格 NanoBanana 提示词（nano_banana_prompt）
 开头必须按**固定顺序**声明所有将随提示词一起送入的参考图，前端会严格按这个顺序拼接图像：
@@ -200,7 +207,7 @@ const Storage = {
 - 硬切转场：存在说话人切换/场景变化/光线突变/焦点转移时，每个面板独立构图、允许硬切。
 - 混合运镜：部分连续部分切换时，明确声明各段策略。
 模板结构：@人物声明 + 关键规则(含运镜策略) + 风格 + 场景描述 + 逐面板运镜与动作(面板1左上/2右上/3左下/4右下，各标景别+运镜) + 负面要求 + 「每个面板16:9，2x2网格排列」。
-视觉风格默认「电影级真实感，自然光照，真人演员」，用户另有指定则用用户值。
+视觉风格统一用 {{风格}}（贯穿全片所有 Shot 与四宫格）；若 {{风格}} 为空则按剧本氛围自定一种统一风格。
 
 【关键一致性铁律 — 四宫格图必须与 local_prompts 完全对应】
 - 四宫格的 4 个面板（左上→右上→左下→右下）必须**逐一对应** local_prompts 的第 1/2/3/4 项，**同序、同内容**。
@@ -221,24 +228,24 @@ const Storage = {
 - local_prompts：返回长度为 4 的数组，每项对应一个 Shot（面板），适配 **Singularity-LTX-2.3 OmniCine** 模型，是**一整段连贯、自然语言的英文画面描述**（信息量要足、动作连贯）。
 
   【Singularity / OmniCine 提示词铁律 — 必看】
-  ① **语言规则**：除「说话内容（对白）」保留中文外，**其余一律使用英文**。不要出现「**Character Prompt (for AI Image Generation):**」之类的任何标题/小标题，直接输出翻译后的自然语言描述。
+  ① **语言规则**：遵循 {{语言}} —— 中文模式整段中文，英文模式除对白原文外一律英文；无论哪种模式，**对白原文都保留中文并用英文单引号 '...' 包裹**。不要出现「**Character Prompt (for AI Image Generation):**」之类的任何标题/小标题，直接输出自然语言描述。
   ② **自然语言、动作连贯**：用连贯的句子描述，不要罗列要素标签。
   ⓿ **【可演化铁律 — 最高优先级，决定生成质量】视频模型只能渲染「看得见的动作、表情、光影」，无法渲染抽象概念、心理活动或隐喻。**
      - **严禁抽象/心理/隐喻描述**：如「沉浸在无梦的深眠中」「没有记忆负担的笑容」「灵魂得到救赎」「内心五味杂陈」——这些必须翻译成**可见的面部动作/肢体动作/光影**。例：「无梦深眠」→ eyes closed, breathing slow and steady, facial muscles fully relaxed；「纯净的笑容」→ corners of the mouth slowly curl up into a soft gentle smile。
      - **严禁否定式对比**：如「不是A的笑，不是B的笑，而是C」。模型不理解否定，反而会把 A、B 特征也画出来（负面污染）。**只描述最终呈现的那个状态**（C），用具体动作写出来。
      - **情绪 → 可见信号**：高兴=嘴角上扬/眼睛微眯；恐惧=瞳孔放大/身体后缩/眉头紧锁；平静=面部放松/呼吸均匀/眼神放空。始终把情绪落到「脸上/身上能看到的具体变化」。
      - **少用形容词堆叠**：同一含义不要反复换词说四遍（如 纯净/纯粹/无垢/无瑕）；说一次、说准即可，把 token 留给动作与光影。
-  ③ **时间分段叙事**：在同一段里按时间推进描述「动作演变 + 运镜 + 光照 + 声音」，用英文时间标记，如 0-5 seconds, ... / 5-10 seconds, ... / 10-15 seconds, ...（秒数根据该 Shot 时长合理划分；短镜头可只用一个区间）。
-  ④ **建议结构顺序**（全英文，自然衔接）：
+  ③ **不要写时间段/时间标记**（不要 0-5 seconds / 0-5秒 这类）；用连贯的自然语言按动作发生顺序描述「动作演进 + 运镜 + 光照 + 声音」（“先…随即…”）。
+  ④ **建议结构顺序**（自然衔接）：
      - 开头：场景与风格（如 Cinematic and realistic style, dynamic and fierce mood.）
-     - 动作描述（分时间段，描述人物动作如何随时间演变）
-- 运镜与构图（分时间段，如 slow dolly in / full shot with dynamic tracking movement / tight close-up, static camera）
+     - 动作描述（连贯描述人物动作如何一步步演进）
+- 运镜与构图（如 slow dolly in / full shot with dynamic tracking movement / tight close-up, static camera）
 - 光照与色调（如 Realistic indoor gym lighting, strong key light, high contrast shadows, desaturated cool tones.）
      - 对白（见下条）
 - 声音设计（如 Ambient gym sounds, sudden dramatic BGM crescendo, precise lip-sync.）
 - 质感词（如 film grain, cinematic bokeh）
 - 末尾 无字幕
-  ⑤ **对白处理（关键，唯一中文）**：用英文句式引出说话人 + 冒号 + 中文对白原文，格式：The woman with blue hair said：等下有你好看的，渣滓！。冒号后是**中文对白原文**（严禁翻译成英文、严禁加引号、严禁换行、严禁出现任何方括号标签或配音情感注释）。可在对白后补充英文声线/语速，如 Voice: clear and sharp, Pace: fast.。说话动词用英文：said / whispered / shouted / asked / murmured / narrated（画外音 voice-over）。
+  ⑤ **对白处理（关键，唯一中文）**：说话人引词 + 冒号 + **英文单引号包裹的中文对白原文**，格式：The woman with blue hair said: '等下有你好看的，渣滓！'（中文模式则写「蓝发女子说：'等下有你好看的，渣滓！'」）。引号内是**中文对白原文**（严禁翻译成英文、严禁换行、严禁出现任何方括号标签或配音情感注释）。可在对白后补充声线/语速，如 Voice: clear and sharp, Pace: fast.。说话动词：said / whispered / shouted / asked / murmured / narrated（画外音 voice-over）。
 ⑥ **无台词的 Shot**：用英文写明 no character dialogue（或 无人物对白），只描述画面与环境音。
 ⑦ **多人同框**：用英文写明谁在说话、谁不说话（如 the man stays silent and does not move his lips），避免对口型驱动错人。
 
@@ -249,7 +256,7 @@ const Storage = {
   【收尾】每个 local_prompt **末尾必须加「无字幕」三个字**（画面不渲染任何字幕/字母/文字水印）。
 
   【完整示例（仅示范风格，实际按剧本生成）】
-  示例 → Cinematic and realistic style, dynamic and fierce mood. 0-5 seconds, woman is gently adjusting and styling her hair, showing a calm preparation. 5-10 seconds, switches to a full shot, she becomes passionate and energetic, performing a series of intense boxing combinations with sharp punches. 10-15 seconds, switches to a tight facial close-up shot, she stares directly into the camera with an aggressive glare. 0-5 seconds, slow dolly in, emphasis composition. 5-10 seconds, full shot with dynamic tracking movement. 10-15 seconds, tight close-up, static camera. Realistic indoor gym lighting, strong key light, high contrast shadows, desaturated cool tones. 10-15 seconds，The woman with blue hair said：等下有你好看的，渣滓！Voice: clear and sharp, Pace: fast. Ambient gym sounds, wind resistance from fast punches, sudden dramatic BGM crescendo, precise lip-sync. film grain, cinematic bokeh，无字幕
+  示例 → Cinematic and realistic style, dynamic and fierce mood. The woman gently adjusts and styles her hair in calm preparation, then steps forward and bursts into a series of intense boxing combinations with sharp punches, finally turning to stare directly into the camera with an aggressive glare. slow dolly in for emphasis, then a full shot with dynamic tracking movement, ending on a tight facial close-up with a static camera. Realistic indoor gym lighting, strong key light, high contrast shadows, desaturated cool tones. The woman with blue hair said: '等下有你好看的，渣滓！' Voice: clear and sharp, Pace: fast. Ambient gym sounds, wind resistance from fast punches, sudden dramatic BGM crescendo, precise lip-sync. film grain, cinematic bokeh，无字幕
 
 - shot_transitions：返回长度为 4 的数组，每项是「该 Shot 到下一个 Shot 的转场 / 镜头语言连贯性描述」（中文单行，用专业运镜词，如：镜头由中景缓慢推近至特写、人物转身向右带出下一场景、光线渐暗淡入下一镜、快速横摇切到对话另一方…）。**每项末尾也必须加「无字幕」**。第 4 项（最后一个面板）可留空字符串。
 
@@ -259,7 +266,7 @@ const Storage = {
   "分镜": {
     "1": {
       "global_prompt": "该组整体视觉描述、场景基底与统一光源（中文单行）",
-      "local_prompts": ["Cinematic and realistic style, calm preparation mood. 0-5 seconds, the man stops typing and stretches lazily at the desk, then raises his fist lightly with a smug grin. slow dolly in, medium shot, eye-level. Cool white daylight slants in from the left window, soft office ambience. 0-5 seconds，the man said：终于搞定了！Voice: relaxed and pleased, Pace: medium. quiet keyboard clicks, gentle room tone, precise lip-sync. film grain，无字幕", "Cinematic and realistic style, surprised tense mood. 0-5 seconds, the woman in the center suddenly looks up with widened eyes and pushes herself up from the desk with both hands. static camera, over-the-shoulder close-up, eye-level. Cold ambient office light, shallow depth of field. no character dialogue. sudden chair scrape, sharp room tone, tense BGM sting，无字幕", "面板3：同样的英文自然语言描述（动作+运镜+光照+声音），如有对白则 said：中文对白，无字幕", "面板4：同上英文自然语言描述，无字幕"],
+      "local_prompts": ["Cinematic and realistic style, relaxed satisfied mood. The man stops typing, leans back and stretches, then raises a fist with a smug grin. slow dolly in, medium shot, eye-level. Cool white daylight slants in from the left window, soft office ambience. The man said: '终于搞定了！' Voice: relaxed and pleased, Pace: medium. quiet keyboard clicks, gentle room tone, precise lip-sync. film grain，无字幕", "Cinematic and realistic style, surprised tense mood. The woman beside him suddenly looks up with widened eyes and pushes herself up from the desk with both hands. static camera, over-the-shoulder close-up, eye-level. Cold ambient office light, shallow depth of field. The woman said: '你居然真做出来了？' Voice: surprised and sharp, Pace: fast. sudden chair scrape, tense room tone，无字幕", "面板3：同样的连贯描述（动作+运镜+光照+声音），如有对白则 said: '中文对白'，无字幕", "面板4：同上连贯描述，无字幕"],
       "shot_transitions": ["镜头由中景缓慢推近至近景，自然过渡，无字幕", "快速横摇切到对话另一方，无字幕", "光线渐暗淡入下一镜，无字幕", ""],
       "nano_banana_prompt": "完整四宫格提示词（中文单行，含@图N声明）。4 个面板须逐一对应 local_prompts 第1/2/3/4项，把每项的景别/机位/位置/动作/表情/环境光影都画到对应面板上；正文结尾必须声明「画面干净，不要任何叠加字幕/对白文字/标题卡/水印/logo，但场景内本应存在的真实文字（招牌/路牌/报纸/屏幕显示/车牌/包装文字）可自然出现，每个面板16:9，2x2网格排列」",
       "ref_assets": [
@@ -268,7 +275,7 @@ const Storage = {
         { "idx": 3, "type": "scene", "name": "场景名" }
       ],
       "dialogues": [
-        { "panel": 1, "character": "角色名或空", "text": "纯净中文台词原文或空（不带任何标签/注释）", "tone": "IndexTTS 八维情感建议值，如「Surprise 0.9、Happy 0.5」或空" },
+        { "panel": 1, "character": "角色名或空", "text": "纯净中文台词原文或空（不带任何标签/注释）", "tone": "中文情绪 + 程度，如「惊讶 较强、开心 轻微」或空" },
         { "panel": 2, "character": "", "text": "", "tone": "" },
         { "panel": 3, "character": "", "text": "", "tone": "" },
         { "panel": 4, "character": "", "text": "", "tone": "" }
@@ -279,7 +286,7 @@ const Storage = {
   }
 }
 
-规则：所有字符串单行无换行；local_prompts 适配 Singularity/OmniCine：**除中文对白外一律英文自然语言**、不要任何标题（如 **Character Prompt...**）、动作连贯、按时间分段（如 0-5 seconds / 5-10 seconds，依镜头时长划分）、依次自然衔接「场景风格→动作→运镜构图→光照色调→对白→声音设计→质感」；对白格式为「英文说话人 said：中文对白原文」（冒号后中文原文，严禁翻译成英文、严禁加引号、严禁换行、严禁出现任何方括号标签或配音情感注释），无对白写 no character dialogue；local_prompts 固定 4 项、每项末尾带「无字幕」；nano_banana_prompt 的 4 个面板必须与 local_prompts 第1/2/3/4项逐一对应（同序、同画面内容），并在正文中明确声明「画面干净、不要叠加字幕/对白文字/标题卡/水印/logo，但场景内真实文字（招牌/屏幕/报纸等）可自然出现」；shot_transitions 固定 4 项（最后一项可空，其余末尾带「无字幕」）；dialogues 固定 4 项（无台词的面板字段留空；text 只放纯净中文台词原文、不带任何标签与注释；tone 写 IndexTTS-2 八维情感建议值如「Angry 1.1、Hate 0.4」）；情感维度与配音注释**只允许出现在 dialogues[].tone**，严禁出现在 text 与 local_prompts/global_prompt/nano_banana_prompt/shot_transitions 等提示词中；幻想生物形态描述完整。`,
+规则：所有字符串单行无换行；local_prompts 遵循 {{语言}}（中文模式整段中文、英文模式除对白外英文）、不要任何标题（如 **Character Prompt...**）、**不写时间段/时间标记**（不要 0-5 seconds / 0-5秒）、用连贯自然语言按动作顺序叙述、依次自然衔接「场景风格→动作演进→运镜构图→光照色调→对白→声音设计→质感」；对白格式为「说话人 said: '中文对白原文'」（**台词原文用英文单引号包裹且保持中文**，严禁翻译、严禁换行、严禁出现任何方括号标签或配音情感注释），无对白写 no character dialogue；local_prompts 固定 4 项、每项末尾带「无字幕」；nano_banana_prompt 的 4 个面板必须与 local_prompts 第1/2/3/4项逐一对应（同序、同画面内容），并在正文中明确声明「画面干净、不要叠加字幕/对白文字/标题卡/水印/logo，但场景内真实文字（招牌/屏幕/报纸等）可自然出现」；shot_transitions 固定 4 项（最后一项可空，其余末尾带「无字幕」）；dialogues 固定 4 项（无台词的面板字段留空；text 只放纯净中文台词原文、不带任何标签与注释；tone 写**中文情绪 + 程度**如「愤怒 很强、厌恶 中等」）；情感与配音注释**只允许出现在 dialogues[].tone**，严禁出现在 text 与 local_prompts/global_prompt/nano_banana_prompt/shot_transitions 等提示词中；幻想生物形态描述完整。`,
             voiceSettings: { textTemplate: "我是{name}，这是我的音色，很高兴认识你", cloneWorkflow: 'vocpm' },
             imageApiGroups: [
                 {

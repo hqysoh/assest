@@ -1267,8 +1267,21 @@ emotions: this._collectEmotions(),
                     <div class="sb-stat"><span class="sb-stat-num">${script.length}</span><span class="sb-stat-label">剧本字数</span></div>
                 </div>
                 <p class="form-hint">将把剧本 + 已生成的人物/道具/场景设定发送给 Claude，自动拆分四宫格分镜（含四宫格提示词、每分镜 local 提示词、全局提示词、台词人物映射）。</p>
+                <div class="form-row" style="display:flex;gap:.75rem;flex-wrap:wrap">
+                    <div class="form-group" style="flex:2;min-width:220px">
+                        <label class="form-label">视觉风格（填入提示词的 {{风格}}，留空则按剧本氛围自定）</label>
+                        <input type="text" class="form-input" id="sbGenStyle" placeholder="如：电影级真实感，自然光照，真人演员 / 日系动画 / 赛博朋克" value="${this.esc(s.storyboardStyle || '')}">
+                    </div>
+                    <div class="form-group" style="flex:1;min-width:120px">
+                        <label class="form-label">输出语言（{{语言}}）</label>
+                        <select class="form-input" id="sbGenLang">
+                            <option value="英文" ${(s.storyboardLang || '英文') === '英文' ? 'selected' : ''}>英文（仅对白中文）</option>
+                            <option value="中文" ${s.storyboardLang === '中文' ? 'selected' : ''}>中文</option>
+                        </select>
+                    </div>
+                </div>
                 <div class="form-group">
-                    <label class="form-label">分镜提取提示词（可临时修改，默认取设置）</label>
+                    <label class="form-label">分镜提取提示词（可临时修改，默认取设置；其中 {{风格}}/{{语言}} 会用上方填写值替换）</label>
                     <textarea class="form-textarea" id="sbGenPrompt" style="min-height:120px">${this.esc(s.storyboardPrompt || '')}</textarea>
                 </div>
                 <div id="sbGenStatus"></div>
@@ -1284,7 +1297,13 @@ emotions: this._collectEmotions(),
     // 弹窗切换为「执行中」视图（与提取人物外观一致），可随时关闭，后台继续轮询。
     async doGenerate() {
         const p = Storage.getProject(this.projectId);
-        const prompt = document.getElementById('sbGenPrompt').value.trim();
+        // 读取风格/语言，替换提示词里的 {{风格}}/{{语言}} 占位符，并记住为下次默认
+        const style = (document.getElementById('sbGenStyle') || {}).value || '';
+        const lang = ((document.getElementById('sbGenLang') || {}).value === '中文') ? '中文' : '英文';
+        const styleVal = style.trim() || '按剧本氛围自定一种统一风格';
+        Storage.saveSettings({ storyboardStyle: style.trim(), storyboardLang: lang });
+        const rawPrompt = document.getElementById('sbGenPrompt').value.trim();
+        const prompt = rawPrompt.replace(/\{\{风格\}\}/g, styleVal).replace(/\{\{语言\}\}/g, lang);
         const btn = document.getElementById('sbGenBtn');
         const statusEl = document.getElementById('sbGenStatus');
         btn.disabled = true; btn.textContent = '⏳ 提交中…';
