@@ -701,6 +701,16 @@ def delete_project_db(pid):
 
 # ==================== Media ====================
 
+def _content_disposition(filename):
+    """生成 Content-Disposition: attachment 头值，兼容中文/特殊字符文件名（RFC 5987）。
+    跨应用拖放（剪映等）依赖此头把响应识别为可下载/可拖出的文件。"""
+    from urllib.parse import quote
+    name = os.path.basename(filename or 'download')
+    # ASCII 兜底名（非 ASCII 字符替换为下划线），同时给出 UTF-8 编码的 filename*
+    ascii_name = name.encode('ascii', 'replace').decode('ascii').replace('?', '_').replace('"', '_')
+    return f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(name)}"
+
+
 def save_media_file(pid, media_type, base64_data):
     # Also save as file for direct HTTP serving
     folder = os.path.join(MEDIA_DIR, pid, media_type)
@@ -1686,6 +1696,9 @@ class Handler(BaseHTTPRequestHandler):
         qs = parse_qs(urlparse(self.path).query)
         raw = (qs.get('path') or [''])[0]
         fpath = unquote(raw)
+        # 拖出/下载文件名：带 dl 参数时附加 Content-Disposition: attachment，
+        # 让 Chromium 的 DownloadURL 拖放（剪映等剪辑软件）能把它识别为可拖出的文件。
+        dl_name = (qs.get('dl') or [''])[0]
         ext = os.path.splitext(fpath)[1].lower()
         allow = {'.mp4': 'video/mp4', '.webm': 'video/webm', '.mov': 'video/quicktime',
                  '.mkv': 'video/x-matroska', '.gif': 'image/gif', '.avi': 'video/x-msvideo'}
@@ -1717,6 +1730,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header('Content-Length', str(length))
         if is_partial:
             self.send_header('Content-Range', f'bytes {start}-{end}/{size}')
+        if dl_name:
+            self.send_header('Content-Disposition', _content_disposition(dl_name))
         self.send_cors()
         self.end_headers()
         try:
@@ -1735,9 +1750,14 @@ class Handler(BaseHTTPRequestHandler):
             pass
 
     def serve_media(self):
-        rel = self.path[len('/api/media/'):]
+        from urllib.parse import urlparse, parse_qs, unquote
+        parsed = urlparse(self.path)
+        rel = parsed.path[len('/api/media/'):]
+        # 拖出/下载文件名：带 dl 参数时附加 Content-Disposition: attachment，
+        # 让 Chromium 的 DownloadURL 拖放（剪映等剪辑软件）能把它识别为可拖出的文件。
+        dl_name = (parse_qs(parsed.query).get('dl') or [''])[0]
         # rel format: <project_id>/<type>/<filename>
-        parts = rel.split('/')
+        parts = unquote(rel).split('/')
         data = None
         mime = 'application/octet-stream'
 
@@ -1758,7 +1778,7 @@ class Handler(BaseHTTPRequestHandler):
 
         # Fallback: read from file system
         if data is None:
-            fpath = os.path.join(MEDIA_DIR, rel)
+            fpath = os.path.join(MEDIA_DIR, unquote(rel))
             if not os.path.isfile(fpath):
                 self.send_error(404, 'Not found'); return
             ext = os.path.splitext(fpath)[1].lower()
@@ -1771,6 +1791,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header('Content-Type', mime)
         self.send_header('Cache-Control', 'max-age=3600')
+        if dl_name:
+            self.send_header('Content-Disposition', _content_disposition(dl_name))
         self.send_cors()
         self.end_headers()
         self.wfile.write(data)

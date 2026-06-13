@@ -129,7 +129,7 @@ const SettingsModule = {
                         onchange="SettingsModule.autoSaveVoice(this.value)">
                 </div>
             </div>
-            <p class="form-hint">配音工作流：人物 / 分镜配音使用的 ComfyUI 工作流，VoxCPM 与 Qwen3-TD-TTS 音色风格略有差异，IndexTTS-2 支持情感维度；分镜页顶部下拉与此处同步。朗读文本模板用 <code>{name}</code> 作为人物姓名占位符。</p>
+            <p class="form-hint">配音工作流：人物 / 分镜配音使用的 ComfyUI 工作流，VoxCPM 与 Qwen3-TD-TTS 音色风格略有差异，IndexTTS-2 支持情感维度。朗读文本模板用 <code>{name}</code> 作为人物姓名占位符。</p>
         </div>
 
         <div class="settings-section">

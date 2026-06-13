@@ -182,12 +182,20 @@ const App = {
             // 绝对 URL（DownloadURL 要求完整地址）
             let abs = url;
             try { abs = new URL(url, location.href).href; } catch (e) {}
+            // 关键：给拖出地址追加 dl=<文件名>，后端据此返回 Content-Disposition: attachment，
+            // 这样剪映等剪辑软件接收 Chromium 的 DownloadURL 拖放时才会把它识别为可拖入的文件。
+            let dlAbs = abs;
+            try {
+                const u = new URL(abs);
+                u.searchParams.set('dl', filename);
+                dlAbs = u.href;
+            } catch (e) { /* 非标准 URL 时退回原地址 */ }
             dt.effectAllowed = 'copy';
             // 关键：DownloadURL → 拖出到外部应用时按此下载为文件
-            dt.setData('DownloadURL', `${m}:${filename}:${abs}`);
+            dt.setData('DownloadURL', `${m}:${filename}:${dlAbs}`);
             // 兼容：拖到支持 URL/文本的目标
-            dt.setData('text/uri-list', abs);
-            dt.setData('text/plain', abs);
+            dt.setData('text/uri-list', dlAbs);
+            dt.setData('text/plain', dlAbs);
         } catch (e) { /* 忽略：不影响页面其它交互 */ }
     },
 

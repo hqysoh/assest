@@ -65,13 +65,6 @@ const StoryboardModule = {
                     <button class="btn-secondary sb-unsel-all" onclick="StoryboardModule.unselectAllGlobal()" ${groups.length ? '' : 'disabled'} title="取消所有组中当前『已勾选合成』的分镜（不改变已标记状态）">☐ 全部取消</button>
                     <button class="btn-secondary sb-trans-toggle ${Storage.getSettings().disableTransition ? 'on' : ''}" onclick="StoryboardModule.toggleDisableTransition()" title="禁用转场：合成视频时不再在相邻两段之间插入转场段（不拼接转场文本/时长）；未禁用时保持现状。">${Storage.getSettings().disableTransition ? '🚫 转场已禁用' : '🔀 禁用转场'}</button>
                     <button class="btn-secondary btn-ghost-danger sb-del-all" onclick="StoryboardModule.delAllGroups()" ${groups.length ? '' : 'disabled'} title="一键删除当前项目下的全部分镜（四宫格 + 单分镜），此操作不可撤销">🗑️ 全部删除</button>
-                    <label class="sb-clone-wf" title="语音克隆工作流：人物/分镜配音使用的 ComfyUI 工作流，VoxCPM 与 Qwen3-TD-TTS 音色风格略有差异，可按需切换">🎙️
-                        <select onchange="StoryboardModule.setCloneWorkflow(this.value)">
-                            <option value="vocpm" ${((Storage.getSettings().voiceSettings || {}).cloneWorkflow || 'vocpm') === 'vocpm' ? 'selected' : ''}>VoxCPM</option>
-                            <option value="qwen3" ${(Storage.getSettings().voiceSettings || {}).cloneWorkflow === 'qwen3' ? 'selected' : ''}>Qwen3-TD-TTS</option>
-                            <option value="indextts" ${(Storage.getSettings().voiceSettings || {}).cloneWorkflow === 'indextts' ? 'selected' : ''}>IndexTTS-2（情感）</option>
-                        </select>
-                    </label>
                 </div>
                 <div class="sb-toolbar-right">
                     <span class="sb-count">${groups.length} 组四宫格 · ${groups.length * 4} 个分镜</span>
@@ -1416,16 +1409,6 @@ emotions: this._collectEmotions(),
         if (this.projectId) this.render(this.projectId);
     },
 
-    // 🎙️ 语音克隆工作流选择：保存到全局设置，人物/分镜配音时读取
-    setCloneWorkflow(wf) {
-        const s = Storage.getSettings();
-        const allow = ['vocpm', 'qwen3', 'indextts'];
-        const cloneWorkflow = allow.includes(wf) ? wf : 'vocpm';
-        Storage.saveSettings({ voiceSettings: { ...(s.voiceSettings || {}), cloneWorkflow } });
-        const label = { vocpm: 'VoxCPM', qwen3: 'Qwen3-TD-TTS', indextts: 'IndexTTS-2（情感）' }[cloneWorkflow];
-        if (window.App && App.showToast) App.showToast(`语音克隆工作流已切换为 ${label}`);
-    },
-
     // IndexTTS-2 情感配置：8 维（与后端 INDEXTTS_EMOTION_KEYS 一致），范围 0~1.4
     _indexttsEmotions: { Happy: 0, Angry: 0, Sad: 0, Fear: 0, Hate: 0, Low: 0, Surprise: 0, Neutral: 0 },
     _indexttsEmotionMeta: [
@@ -1713,7 +1696,9 @@ emotions: this._collectEmotions(),
         const p = Storage.getProject(this.projectId);
         const g = (p.storyboardGroups || []).find(x => x.id === gid);
         if (!g) return;
-        const text = (g.nanoPrompt || '').trim();
+        // 优先取配置弹窗中文本框的实时内容（可能用户刚编辑还未失焦保存），否则回退 storage
+        const live = (document.getElementById('fgPrompt') || {}).value;
+        const text = ((live != null ? live : (g.nanoPrompt || '')) || '').trim();
         if (!text) { App.showToast('该组暂无四宫格生成提示词', 'info'); return; }
         App.confirm({ title: '🎨 四宫格生成提示词', message: text, okText: '知道了', cancelText: '关闭' });
     },
@@ -1813,9 +1798,12 @@ emotions: this._collectEmotions(),
                 })()}
 
                 <div class="form-group">
-                    <label class="form-label">四宫格生成提示词（nano，可改）</label>
-                    <textarea class="form-textarea" id="fgPrompt" style="min-height:120px" onchange="StoryboardModule._saveFgPrompt('${gid}', this.value)">${this.esc(g.nanoPrompt || g.globalPrompt || '')}</textarea>
-                    <p class="form-hint" style="margin-top:0.3rem">提示词开头应按 <b>@图1=…、@图2=…</b> 顺序声明参考图，下方列表的索引就是接口收到的顺序（@图0 为额外衔接图，不占此序号）。</p>
+                    <div class="meta-header">
+                        <label class="form-label" style="margin:0">四宫格生成提示词（nano，可改）</label>
+                        <button class="btn-ghost btn-tiny" onclick="StoryboardModule.viewNanoFull('${gid}')" title="弹窗只读显示完整提示词内容">🔍 查看完整</button>
+                    </div>
+                    <textarea class="form-textarea" id="fgPrompt" style="min-height:120px;max-height:200px;overflow:auto" onchange="StoryboardModule._saveFgPrompt('${gid}', this.value)">${this.esc(g.nanoPrompt || g.globalPrompt || '')}</textarea>
+                    <p class="form-hint" style="margin-top:0.3rem">提示词开头应按 <b>@图1=…、@图2=…</b> 顺序声明参考图，下方列表的索引就是接口收到的顺序（@图0 为额外衔接图，不占此序号）。文字过长时可点「🔍 查看完整」弹窗查看。</p>
                 </div>
                 <div class="form-group">
                     <div class="meta-header">
@@ -1886,7 +1874,7 @@ emotions: this._collectEmotions(),
     // 构造默认衔接要求：带上一组四宫格的画面内容（nano_banana_prompt），并说明由下游模型按四宫格要求自行决定是否参考
     _buildPrevLinkNote(lastLocal) {
         const lp = (lastLocal || '').trim();
-        const lpPart = lp ? `上一个四宫格画面内容为：${lp}。` : '';
+        const lpPart = lp ? `上一个四宫格画面内容为：【${lp}】。` : '';
         return `@图0 是上一个四宫格的成品图。${lpPart}请根据下方四宫格要求，自行决定是否参考 @图0：若需衔接，则让本组第 1 格在上一个四宫格的画面基础上自然延续，保持人物外形与服装、人物在画面中所处的位置与朝向、场景环境、光线方向与明暗、整体色调，以及镜头视角与景别的连贯一致，使本组宫格之间以及与上一个四宫格的过渡平滑流畅、无跳变、无穿帮。`;
     },
 
