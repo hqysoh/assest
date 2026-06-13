@@ -3054,6 +3054,8 @@ emotions: this._collectEmotions(),
             imageClips.push({
                 uid: imgUid,
                 imageId: s.imageId, prompt: s.prompt || '',
+                // 回写映射：记住该段来自哪个分镜组的哪个面板，用于在时间轴里编辑 local/转场提示词时同步回原始分镜
+                groupId: s.groupId, panel: s.panel, single: !!s.single,
                 dialogue: s.dialogue || {}, transition: s.transition || 'cut',
                 shotTransition: tText,                                 // 该段后的转场描述文本
                 transitionDur: tText ? TRANS_DEF_SEC : 0,              // 转场时长（秒），无文本=0=不插入
@@ -3916,7 +3918,8 @@ this._tl._audioUserSet = true;   // 标记用户手动设置过：之后切换�
                 </div>
                 <textarea class="form-textarea sb-dir-prev-parea" id="tlPrevPrompt"
                     placeholder="描述这一段的画面内容…（local 提示词）"
-                    oninput="StoryboardModule.tlSetPrompt('${c.uid}', this.value)">${this.esc(promptVal)}</textarea>
+                    onfocus="StoryboardModule.tlAutoGrow(this)" onblur="StoryboardModule.tlAutoGrowReset(this)"
+                    oninput="StoryboardModule.tlSetPrompt('${c.uid}', this.value);StoryboardModule.tlAutoGrow(this)">${this.esc(promptVal)}</textarea>
             </div>
             <div class="sb-dir-prev-prompt sb-dir-prev-trans">
                 <div class="sb-dir-prev-phead">
@@ -3928,11 +3931,23 @@ this._tl._audioUserSet = true;   // 标记用户手动设置过：之后切换�
                 </div>
                 <textarea class="form-textarea sb-dir-prev-parea" id="tlPrevTrans"
                     placeholder="到下一段的转场 / 镜头语言（如：镜头由中景推近至特写、硬切到对话另一方…）。留空则不插入转场段。"
-                    oninput="StoryboardModule.tlSetTrans('${c.uid}', this.value)">${this.esc(transVal)}</textarea>
+                    onfocus="StoryboardModule.tlAutoGrow(this)" onblur="StoryboardModule.tlAutoGrowReset(this)"
+                    oninput="StoryboardModule.tlSetTrans('${c.uid}', this.value);StoryboardModule.tlAutoGrow(this)">${this.esc(transVal)}</textarea>
             </div>`
             : `<div class="sb-dir-prev-empty">点击上方图像段，可在此查看 / 编辑该段的 local 提示词</div>`;
         this._prevUid = c ? c.uid : null;
         this._prevTalk = talk;
+    },
+    // 提示词 textarea：聚焦/输入时根据内容自动擑高（展开看全），最高 320px 后内部滚动
+    tlAutoGrow(el) {
+        if (!el) return;
+        el.style.height = 'auto';
+        el.style.height = Math.min(el.scrollHeight + 2, 320) + 'px';
+    },
+    // 失焦时收回默认高度（留空时恢复原始紧凑高度；有内容也收回，下次点击再展开）
+    tlAutoGrowReset(el) {
+        if (!el) return;
+        el.style.height = '';
     },
     // 当前应显示的台词：播放中→命中当前帧的音频块台词；非播放→选中图像段对应的台词
     _currentTalk() {
@@ -3972,6 +3987,7 @@ this._tl._audioUserSet = true;   // 标记用户手动设置过：之后切换�
         const c = this._tl && this._tl.imageClips.find(x => x.uid === uid);
         if (!c) return;
         c.prompt = v;
+        this._syncClipToStoryboard(c, 'prompt');   // 同步回原始分镜（debounce 持久化）
         const host = document.getElementById('sbDirTracks');
         const el = host && host.querySelector(`.sb-dir-clip[data-uid="${uid}"][data-kind="img"] .sb-dir-clip-body`);
         if (!el) return;
@@ -3997,6 +4013,34 @@ this._tl._audioUserSet = true;   // 标记用户手动设置过：之后切换�
         c.shotTransition = v;
         // 文本从无到有时给个默认时长，避免合成时被当作 0=不插入
         if (v && !(Number(c.transitionDur) > 0)) c.transitionDur = 0.5;
+        this._syncClipToStoryboard(c, 'trans');    // 同步回原始分镜（debounce 持久化）
+    },
+
+    // 把时间轴里编辑的 local 提示词 / 转场提示词写回原始分镜并持久化（保持内外同步）。
+    // field: 'prompt'=local 提示词 | 'trans'=转场提示词。用 debounce 避免 oninput 高频写盘卡顿。
+    _syncClipToStoryboard(c, field) {
+        if (!c || c.groupId == null) return;
+        // 按 段uid:字段 维度各自 debounce，避免「快速切换不同输入框」时后一次取消前一次的写盘导致丢失
+        if (!this._clipSyncTimers) this._clipSyncTimers = {};
+        const tkey = `${c.uid}:${field}`;
+        clearTimeout(this._clipSyncTimers[tkey]);
+        this._clipSyncTimers[tkey] = setTimeout(() => {
+            const p = Storage.getProject(this.projectId);
+            const g = (p.storyboardGroups || []).find(x => x.id === c.groupId);
+            if (!g) return;
+            if (field === 'prompt') {
+                if (c.single) {
+                    g.prompt = c.prompt || '';
+                } else {
+                    if (!Array.isArray(g.localPrompts)) g.localPrompts = ['', '', '', ''];
+                    g.localPrompts[c.panel] = c.prompt || '';
+                }
+            } else if (field === 'trans') {
+                if (!Array.isArray(g.shotTransitions)) g.shotTransitions = ['', '', '', ''];
+                g.shotTransitions[c.panel] = c.shotTransition || '';
+            }
+            Storage.updateProject(this.projectId, { storyboardGroups: p.storyboardGroups });
+        }, 400);
     },
     // 编辑转场时长（秒）
     tlSetTransDur(uid, v) {

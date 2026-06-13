@@ -978,9 +978,10 @@ line-height:1.2;transition:border-color .18s,box-shadow .18s,background .18s;min
 .sb-dir-prev-phead{display:flex;align-items:center;justify-content:space-between;margin-bottom:0.45rem}
 .sb-dir-prev-plabel{font-size:0.74rem;font-weight:700;color:var(--ac,#7c82ff)}
 .sb-dir-prev-phint{font-size:0.62rem;color:var(--t3,#888);font-weight:500}
-.sb-dir-prev-parea{width:100%;min-height:62px;resize:vertical;font-size:0.82rem;line-height:1.5;
-    border:1px solid var(--bd);border-radius:9px;padding:0.55rem 0.7rem;background:var(--bg3);
-    color:var(--t);transition:border-color .15s,box-shadow .15s}
+.sb-dir-prev-parea{width:100%;min-height:62px;max-height:320px;resize:vertical;font-size:0.82rem;line-height:1.5;
+overflow-y:auto;
+border:1px solid var(--bd);border-radius:9px;padding:0.55rem 0.7rem;background:var(--bg3);
+    color:var(--t);transition:height .15s ease,border-color .15s,box-shadow .15s}
 /* 聚焦时保持深底浅字（覆盖 .form-textarea:focus 把背景变白导致看不见的问题） */
 .sb-dir-prev-parea:focus{outline:none;border-color:var(--ac,#7c82ff);background:var(--bg3);
     color:var(--t);box-shadow:0 0 0 3px rgba(124,130,255,.22)}
