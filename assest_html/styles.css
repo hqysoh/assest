@@ -325,6 +325,14 @@ input[type="checkbox"]{accent-color:var(--ac)}
 /* 应用内确认弹窗：盖在普通 modal 之上 */
 #confirmOverlay{z-index:3000}
 .confirm-modal{max-width:440px}
+/* 设置弹窗：层级低于通用 modal（让内部「全屏编辑提示词」子弹窗能叠在其上）；内容较多，故更宽 */
+#settingsOverlay{z-index:900}
+.settings-modal{max-width:880px}
+.settings-modal-body{padding:1.3rem 1.5rem}
+.settings-modal-body .settings-section{margin-top:1.4rem}
+.settings-modal-body .settings-section:first-child{margin-top:0}
+.settings-modal-body .page-header{margin-bottom:0.6rem}
+.settings-modal .modal-header .settings-header-right{display:flex;align-items:center;gap:0.6rem}
 .confirm-text{font-size:0.9rem;line-height:1.7;color:var(--t1);white-space:normal;word-break:break-word}
 @keyframes overlayIn{from{opacity:0}to{opacity:1}}
 .modal{background:var(--card-solid);border:1px solid var(--bd);border-radius:18px;max-width:700px;width:94%;max-height:90vh;overflow-y:auto;box-shadow:0 30px 70px rgba(0,0,0,.6);animation:modalIn .32s cubic-bezier(.34,1.4,.5,1)}

@@ -22,7 +22,10 @@ const App = {
         }
         const parts = hash.split('/');
         if (parts[0] === 'settings') {
-            this.navigateToSettings(false);
+            // 设置已改为弹窗，不再作为独立页面。兼容旧的 #settings 链接：
+            // 回到首页并自动弹出设置弹窗（不影响主内容浏览）。
+            this.navigateToHome(false);
+            if (typeof SettingsModule !== 'undefined') SettingsModule.open();
         } else if (parts[0] === 'project' && parts[1]) {
             this.navigateToProject(parts[1], false);
         } else {
@@ -53,7 +56,8 @@ const App = {
 
     setupEventListeners() {
         document.getElementById('settingsBtn').addEventListener('click', () => {
-            this.navigateToSettings(true);
+            // 设置改为弹窗：打开时不影响当前正在浏览的页面，关闭后仍停留在原页面。
+            SettingsModule.open();
         });
         document.getElementById('themeToggle').addEventListener('click', () => {
             this.toggleTheme();
@@ -67,6 +71,13 @@ const App = {
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') {
                 if (this.modalLocked) return;
+                // 通用 modal 在上层时优先关它（如设置内的「全屏编辑」子弹窗）；否则关设置弹窗。
+                const genericOpen = document.getElementById('modalOverlay').classList.contains('active');
+                const settingsOv = document.getElementById('settingsOverlay');
+                if (!genericOpen && settingsOv && settingsOv.classList.contains('active')) {
+                    SettingsModule.close();
+                    return;
+                }
                 this.closeModal();
             }
         });
@@ -105,15 +116,9 @@ const App = {
         ProjectModule.render(projectId);
     },
 
-    navigateToSettings(updateHash) {
-        if (updateHash !== false) {
-            this.previousPage = this.currentPage;
-            this.previousProjectId = this.currentProjectId;
-            window.location.hash = '#settings';
-        }
-        this.currentPage = 'settings';
-        this.updateBackBtn();
-        SettingsModule.render();
+    // 设置已改为弹窗，此方法保留兼容：直接打开弹窗，不切换主内容页面。
+    navigateToSettings() {
+        SettingsModule.open();
     },
 
     navigateBack() {

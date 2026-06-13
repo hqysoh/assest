@@ -1,22 +1,51 @@
 const SettingsModule = {
+    // 打开设置弹窗（独立 overlay，不影响当前浏览的页面）。关闭时直接隐藏即可恢复。
+    open() {
+        this.render();
+    },
+    // 关闭设置弹窗：仅隐藏弹窗，不触碰主内容（当前页面保持不变）。
+    close() {
+        const ov = document.getElementById('settingsOverlay');
+        if (ov) ov.classList.remove('active');
+    },
+
+    // 确保设置弹窗的 overlay/容器存在（独立于通用 modalOverlay，
+    // 这样设置内部的「全屏编辑提示词」子弹窗仍可叠加在其之上）。
+    _ensureOverlay() {
+        let ov = document.getElementById('settingsOverlay');
+        if (!ov) {
+            ov = document.createElement('div');
+            ov.id = 'settingsOverlay';
+            ov.className = 'modal-overlay';
+            ov.innerHTML = '<div class="modal settings-modal" id="settingsModal"></div>';
+            document.body.appendChild(ov);
+            // 点击遮罩空白处关闭
+            ov.addEventListener('click', (e) => { if (e.target === ov) this.close(); });
+        }
+        return ov;
+    },
+
     render() {
         const s = Storage.getSettings();
-        const main = document.getElementById('mainContent');
+        const ov = this._ensureOverlay();
+        const box = ov.querySelector('#settingsModal');
         const groups = s.imageApiGroups || [];
         const defs = s.imageDefaults || {};
         const voice = s.voiceSettings || {};
         const theme = s.theme || 'dark';
         const gHtml = groups.map(g => this.renderGroup(g)).join('');
 
-        main.innerHTML = `
-        <div class="page-header">
-            <div class="page-title-row">
-                <h1 class="page-title">设置</h1>
-                <div class="settings-header-right">
-                    <span class="autosave-indicator" id="savedFlag"><span class="autosave-dot"></span>已自动保存</span>
-                    <button class="btn-ghost btn-tiny btn-ghost-danger" onclick="SettingsModule.resetDefaults()" title="将所有设置恢复为默认值">↺ 恢复默认</button>
-                </div>
+        box.innerHTML = `
+        <div class="modal-header">
+            <h2 class="modal-title">设置</h2>
+            <div class="settings-header-right">
+                <span class="autosave-indicator" id="savedFlag"><span class="autosave-dot"></span>已自动保存</span>
+                <button class="btn-ghost btn-tiny btn-ghost-danger" onclick="SettingsModule.resetDefaults()" title="将所有设置恢复为默认值">↺ 恢复默认</button>
+                <button class="modal-close" onclick="SettingsModule.close()" title="关闭">×</button>
             </div>
+        </div>
+        <div class="modal-body settings-modal-body">
+        <div class="page-header">
             <p class="page-subtitle">配置外观、AI 接口、图像生成与全局提示词 · <strong>所有修改即时自动保存到数据库</strong></p>
         </div>
 
@@ -133,7 +162,11 @@ const SettingsModule = {
                     <span class="char-counter" id="sbPromptCounter">0 字</span>
                 </div>
             </div>
+        </div>
         </div>`;
+
+        // 显示弹窗（不影响主内容）
+        ov.classList.add('active');
 
         // After render: size the prompt editor and update counter
         requestAnimationFrame(() => {
