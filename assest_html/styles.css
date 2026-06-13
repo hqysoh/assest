@@ -804,6 +804,23 @@ input[type="checkbox"]{accent-color:var(--ac)}
 .sb-tl-global{flex:1;min-width:240px}
 .sb-tl-global label{display:block;font-size:0.7rem;color:var(--t3);font-weight:600;margin-bottom:0.25rem}
 
+/* ===== 合成视频二次确认浮层（覆盖在时间轴弹窗之上）===== */
+.sb-genconfirm-mask{position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;
+background:rgba(0,0,0,0.55);backdrop-filter:blur(2px)}
+.sb-genconfirm-box{width:min(420px,92vw);background:var(--bg2,#fff);border:1px solid var(--bd);border-radius:14px;
+box-shadow:0 20px 60px rgba(0,0,0,0.35);overflow:hidden}
+.sb-genconfirm-box .modal-header{padding:0.9rem 1.25rem;border-bottom:1px solid var(--bd)}
+.sb-genconfirm-box .modal-footer{padding:0.8rem 1.25rem;border-top:1px solid var(--bd);
+display:flex;justify-content:flex-end;gap:0.6rem}
+
+/* ===== 定位首个已选：高亮闪动 ===== */
+.sb-row-flash{animation:sbRowFlash 1.8s ease-out}
+@keyframes sbRowFlash{
+0%{box-shadow:0 0 0 3px var(--ac,#4f8cff),0 0 18px 4px rgba(79,140,255,0.55);background:rgba(79,140,255,0.10)}
+60%{box-shadow:0 0 0 3px var(--ac,#4f8cff),0 0 14px 3px rgba(79,140,255,0.35);background:rgba(79,140,255,0.06)}
+100%{box-shadow:none;background:transparent}
+}
+
 /* ===== LTX Director 可视化双轨时间轴 ===== */
 .sb-dir-body{max-height:82vh;overflow:auto}
 .sb-dir-toolbar{display:flex;align-items:center;gap:0.6rem;flex-wrap:wrap;margin-bottom:0.7rem;

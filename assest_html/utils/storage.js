@@ -176,17 +176,15 @@ const Storage = {
 
 # 四、台词识别与人物映射（关键，不可跳过）
 逐段标记台词归属：被引号包裹、或"说道/低语/喊道/呢喃"等动词后的内容、明确的旁白/画外音 = 台词。
-为每个有台词的 Shot 记录：说话人角色名、台词中文原文、语气（如 语气得意/愤怒/委屈/平静/紧张/机械冰冷）。
+为每个有台词的 Shot 记录：说话人角色名、台词中文原文、情感（写进 tone，用 IndexTTS-2 八维点出主导维度+强度，见下方说明）。
 台词原文保持中文，**严禁翻译成英文**。
 
-【配音情绪标签库（仅用于 dialogues[].text 的配音文本，可选、克制点缀）】
-在 dialogues[].text 的台词中，可以根据情绪在合适位置**偶尔**点缀以下英文标签（一句最多 1~2 个，宁缺毋滥，无明显情绪就不加）：
-- 😆 笑声/叹气：[laughing]、[sigh]
-- 🤫 停顿/思考：[Uhm]、[Shh]
-- ❓ 疑问/确认：[Question-ah]、[Question-ei]、[Question-en]、[Question-oh]、[Confirmation-en]
-- ❗ 惊讶/情绪：[Surprise-wa]、[Surprise-yo]、[Surprise-ah]、[Surprise-oh]、[Dissatisfaction-hnn]
-标签按原文保留方括号与英文，直接嵌入中文台词中，例如：text 写「[Surprise-wa] 真的假的？」「原来是这样啊 [Confirmation-en]」。
-⚠ 这些标签**只能出现在 dialogues[].text**（送去配音的文本）里；**严禁出现在 local_prompts、global_prompt、nano_banana_prompt、shot_transitions 等任何画面提示词中**（画面提示词里的台词保持纯净中文，不带任何标签）。
+【配音情绪（IndexTTS-2 八维情感，写进 dialogues[].tone 供合成时手动调节）】
+配音用 IndexTTS-2，支持八个情感维度，每维强度 0~1.4（0=无，越大越强）：Happy(高兴)、Angry(愤怒)、Sad(悲伤)、Fear(恐惧)、Hate(厌恶)、Low(低落)、Surprise(惊讶)、Neutral(平静)。
+为每句有台词的 Shot，在 dialogues[].tone 里用**简短中文**写明该句的情感倾向：点出「哪几维偏高、各约多少」，作为合成时手动调滑块的参考起点（最终由用户在合成弹窗里微调）。
+- 写法：自然语言点名维度 + 大致强度，例如：「Surprise 0.9、Happy 0.5（又惊又喜）」「Angry 1.1、Hate 0.4（暴怒带厌恶）」「Neutral 0.8（平静陈述）」「Sad 0.7、Low 0.6（低落悲伤）」。
+- 原则：一句通常 1~3 个主导维度即可，宁少勿杂；情绪平淡就写「Neutral 0.6~0.8」。强度落在 0~1.4，常用区间 0.3~1.1。
+- ⚠ 这些情感描述**只能写在 dialogues[].tone**；dialogues[].text 只放**纯净中文台词原文**（不带任何标签、不带情感注释）；local_prompts/global_prompt/nano_banana_prompt/shot_transitions 等画面提示词里也**严禁出现情感维度词或配音注释**。
 
 # 五、四宫格 NanoBanana 提示词（nano_banana_prompt）
 开头必须按**固定顺序**声明所有将随提示词一起送入的参考图，前端会严格按这个顺序拼接图像：
@@ -240,7 +238,7 @@ const Storage = {
 - 声音设计（如 Ambient gym sounds, sudden dramatic BGM crescendo, precise lip-sync.）
 - 质感词（如 film grain, cinematic bokeh）
 - 末尾 无字幕
-  ⑤ **对白处理（关键，唯一中文）**：用英文句式引出说话人 + 冒号 + 中文对白原文，格式：The woman with blue hair said：等下有你好看的，渣滓！。冒号后是**中文对白原文**（严禁翻译成英文、严禁加引号、严禁换行、严禁出现 [laughing]/[Surprise-wa] 等配音标签）。可在对白后补充英文声线/语速，如 Voice: clear and sharp, Pace: fast.。说话动词用英文：said / whispered / shouted / asked / murmured / narrated（画外音 voice-over）。
+  ⑤ **对白处理（关键，唯一中文）**：用英文句式引出说话人 + 冒号 + 中文对白原文，格式：The woman with blue hair said：等下有你好看的，渣滓！。冒号后是**中文对白原文**（严禁翻译成英文、严禁加引号、严禁换行、严禁出现任何方括号标签或配音情感注释）。可在对白后补充英文声线/语速，如 Voice: clear and sharp, Pace: fast.。说话动词用英文：said / whispered / shouted / asked / murmured / narrated（画外音 voice-over）。
 ⑥ **无台词的 Shot**：用英文写明 no character dialogue（或 无人物对白），只描述画面与环境音。
 ⑦ **多人同框**：用英文写明谁在说话、谁不说话（如 the man stays silent and does not move his lips），避免对口型驱动错人。
 
@@ -270,7 +268,7 @@ const Storage = {
         { "idx": 3, "type": "scene", "name": "场景名" }
       ],
       "dialogues": [
-        { "panel": 1, "character": "角色名或空", "text": "台词中文原文或空（可按情绪点缀 [Surprise-wa]/[sigh] 等配音标签）", "tone": "语气或空" },
+        { "panel": 1, "character": "角色名或空", "text": "纯净中文台词原文或空（不带任何标签/注释）", "tone": "IndexTTS 八维情感建议值，如「Surprise 0.9、Happy 0.5」或空" },
         { "panel": 2, "character": "", "text": "", "tone": "" },
         { "panel": 3, "character": "", "text": "", "tone": "" },
         { "panel": 4, "character": "", "text": "", "tone": "" }
@@ -281,7 +279,7 @@ const Storage = {
   }
 }
 
-规则：所有字符串单行无换行；local_prompts 适配 Singularity/OmniCine：**除中文对白外一律英文自然语言**、不要任何标题（如 **Character Prompt...**）、动作连贯、按时间分段（如 0-5 seconds / 5-10 seconds，依镜头时长划分）、依次自然衔接「场景风格→动作→运镜构图→光照色调→对白→声音设计→质感」；对白格式为「英文说话人 said：中文对白原文」（冒号后中文原文，严禁翻译成英文、严禁加引号、严禁换行、严禁出现 [Surprise-wa] 等配音标签），无对白写 no character dialogue；local_prompts 固定 4 项、每项末尾带「无字幕」；nano_banana_prompt 的 4 个面板必须与 local_prompts 第1/2/3/4项逐一对应（同序、同画面内容），并在正文中明确声明「画面干净、不要叠加字幕/对白文字/标题卡/水印/logo，但场景内真实文字（招牌/屏幕/报纸等）可自然出现」；shot_transitions 固定 4 项（最后一项可空，其余末尾带「无字幕」）；dialogues 固定 4 项（无台词的面板字段留空，text 可按情绪偶尔点缀配音情绪标签如 [Surprise-wa]/[Confirmation-en]）；配音情绪标签**只允许出现在 dialogues[].text**，严禁出现在 local_prompts/global_prompt/nano_banana_prompt/shot_transitions 等画面提示词中；幻想生物形态描述完整。`,
+规则：所有字符串单行无换行；local_prompts 适配 Singularity/OmniCine：**除中文对白外一律英文自然语言**、不要任何标题（如 **Character Prompt...**）、动作连贯、按时间分段（如 0-5 seconds / 5-10 seconds，依镜头时长划分）、依次自然衔接「场景风格→动作→运镜构图→光照色调→对白→声音设计→质感」；对白格式为「英文说话人 said：中文对白原文」（冒号后中文原文，严禁翻译成英文、严禁加引号、严禁换行、严禁出现任何方括号标签或配音情感注释），无对白写 no character dialogue；local_prompts 固定 4 项、每项末尾带「无字幕」；nano_banana_prompt 的 4 个面板必须与 local_prompts 第1/2/3/4项逐一对应（同序、同画面内容），并在正文中明确声明「画面干净、不要叠加字幕/对白文字/标题卡/水印/logo，但场景内真实文字（招牌/屏幕/报纸等）可自然出现」；shot_transitions 固定 4 项（最后一项可空，其余末尾带「无字幕」）；dialogues 固定 4 项（无台词的面板字段留空；text 只放纯净中文台词原文、不带任何标签与注释；tone 写 IndexTTS-2 八维情感建议值如「Angry 1.1、Hate 0.4」）；情感维度与配音注释**只允许出现在 dialogues[].tone**，严禁出现在 text 与 local_prompts/global_prompt/nano_banana_prompt/shot_transitions 等提示词中；幻想生物形态描述完整。`,
             voiceSettings: { textTemplate: "我是{name}，这是我的音色，很高兴认识你", cloneWorkflow: 'vocpm' },
             imageApiGroups: [
                 {
@@ -302,6 +300,12 @@ const Storage = {
                 // 让画面在语音开始前 / 结束后各多留一段，避免一开口就切镜或话没说完就转场。
                 audioPadHeadSec: 0.5,   // 语音前留白（秒）
                 audioPadTailSec: 0.5    // 语音后留白（秒）
+            },
+            // 合成视频默认参数：进入时间轴(openTimeline)时作为初始值，可在弹窗内临时改动。
+            // workflow: 'director'(旧导演台 LTXDirector) | 'singularity'(乱神版V3)
+            videoDefaults: {
+                workflow: 'director',
+                epsilon: 0.9            // 过渡柔和度（0.001 硬切 ~ 1.0 最柔）
             },
             theme: 'light'
         };

@@ -58,6 +58,7 @@ const StoryboardModule = {
                 <div class="sb-toolbar-left">
                     ${genBtnHtml}
                     <button class="sb-compose-btn" onclick="StoryboardModule.openTimeline()" ${groups.length ? '' : 'disabled'} title="进入时间轴合成视频：将已勾选的分镜按图像/音频双轨对齐后生成成片"><span class="sb-compose-ic">🎞️</span><span>合成视频</span></button>
+                    <button class="btn-secondary sb-jump-sel" onclick="StoryboardModule.jumpToFirstSelected()" ${groups.length ? '' : 'disabled'} title="滚动定位到第一个『已勾选合成视频』的分镜并高亮">🎯 定位首个已选</button>
                     <button class="btn-secondary" onclick="StoryboardModule.importGroupsFromFile()" title="上传分镜 JSON（含 person / 分镜 字段，与智能生成的格式一致），也可直接把 .json 拖到下方区域">📥 上传 JSON</button>
                     <input type="file" id="sbImportJson" accept="application/json,.json" style="display:none" onchange="StoryboardModule.onImportJsonFile(event)">
                     <button class="btn-secondary" onclick="StoryboardModule.exportContextJson()" title="导出剧本 / 人物 / 道具 / 场景为 JSON，供另一台机器导入或生成分镜复用">📤 导出素材</button>
@@ -139,7 +140,7 @@ const StoryboardModule = {
         // 四个 local 提示词行（无限列表形式），每行右侧配音按钮
         const localRows = [0, 1, 2, 3].map(i => this.renderLocalRow(g, i, idx)).join('');
 
-        return `<div class="list-row">
+        return `<div class="list-row" id="sbRow_${g.id}">
             <div class="list-row-img-section">
                 <div class="list-row-img sb-row-fourgrid" onclick="${fourUrl ? `CharacterModule.openImageZoom('${fourUrl}','第${idx + 1}组四宫格','')` : ''}" style="position:relative">
                     ${fourUrl
@@ -237,7 +238,7 @@ const StoryboardModule = {
         const selected = g.selected !== false;  // 默认选中
         const marked = !!g.marked;
 
-        return `<div class="list-row sb-single-row ${marked ? 'sb-marked' : (selected ? 'sb-picked' : '')}">
+        return `<div class="list-row sb-single-row ${marked ? 'sb-marked' : (selected ? 'sb-picked' : '')}" id="sbRow_${g.id}">
             <div class="list-row-img-section">
                 <div class="list-row-img" onclick="${imgUrl ? `CharacterModule.openImageZoom('${imgUrl}','单分镜','')` : ''}">
                     ${imgUrl ? `<img src="${imgUrl}" alt="单分镜">` : `<div class="sb-thumb-placeholder ${imgErr ? 'sb-thumb-error' : ''}">${placeholder}</div>`}
@@ -1169,6 +1170,26 @@ emotions: this._collectEmotions(),
         Storage.updateProject(this.projectId, { storyboardGroups: groups });
         App.showToast(`已取消 ${count} 个分镜的勾选`, 'success');
         this.render(this.projectId);
+    },
+
+    // 🎯 定位首个已选：滚动到第一个『已勾选合成视频』的分镜卡片并高亮一下。
+    // 勾选判断与 openTimeline/unselectAllGlobal 一致：单分镜 selected !== false；四宫格任一面板 panelSelected[i] !== false。
+    jumpToFirstSelected() {
+        const p = Storage.getProject(this.projectId);
+        const groups = p.storyboardGroups || [];
+        const target = groups.find(g => g.single
+            ? (g.selected !== false)
+            : [0, 1, 2, 3].some(i => !(g.panelSelected && g.panelSelected[i] === false)));
+        if (!target) { App.showToast('当前没有勾选『合成视频』的分镜', 'info'); return; }
+        const el = document.getElementById('sbRow_' + target.id);
+        if (!el) { App.showToast('未找到该分镜卡片', 'error'); return; }
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        // 高亮一下：加类，动画结束后移除（可重复触发）
+        el.classList.remove('sb-row-flash');
+        // 强制重排以便重复点击能再次触发动画
+        void el.offsetWidth;
+        el.classList.add('sb-row-flash');
+        setTimeout(() => el.classList.remove('sb-row-flash'), 1800);
     },
 
     // 禁用/启用转场：禁用后合成视频时不再拼接转场段（transition 文本/时长清零）；未禁用时保持现状
@@ -3097,8 +3118,9 @@ emotions: this._collectEmotions(),
             pxPerFrame: 1.4,                      // 缩放：像素/帧
             globalPrompt: first.globalPrompt || first.prompt || '',
             guideStrength: '1.00',                // 引导强度默认值（1.0=最大约束，最贴近引导图）
-                epsilon: 0.9,                         // 过渡柔和度（0.001 硬切 ~ 1.0 最柔，默认 0.9 转场更柔和）
-                workflow: 'director',                 // 导演台工作流：'director'(默认，旧 LTXDirector) | 'singularity'(乱神版V3)
+                // Epsilon / 合成工作流：默认值取自设置（settings.videoDefaults），可在时间轴弹窗内临时改动
+                epsilon: (Storage.getSettings().videoDefaults || {}).epsilon ?? 0.9,
+                workflow: (Storage.getSettings().videoDefaults || {}).workflow || 'director',
                 // 使用音频：ON=用上传音频；OFF=让模型按提示词从零生成音频（含环境音）。
                 // 两个工作流（乱神版/旧导演台）均默认关闭（由模型从零生成音频）。
                 useCustomAudio: false,
@@ -3251,7 +3273,7 @@ emotions: this._collectEmotions(),
             <div class="modal-footer">
                 <button class="btn-secondary" onclick="StoryboardModule.closeTimeline()">关闭</button>
                 <button class="btn-danger" id="tlCancelBtn" style="display:none" onclick="StoryboardModule.cancelVideo()">⏹ 打断</button>
-                <button class="btn-primary" id="tlGenBtn" onclick="StoryboardModule.genVideo()">🎬 生成视频</button>
+                <button class="btn-primary" id="tlGenBtn" onclick="StoryboardModule.confirmGenVideo()">🎬 生成视频</button>
             </div>`;
         document.getElementById('modalOverlay').classList.add('active');
         this._renderTracks();
@@ -4115,6 +4137,61 @@ this._tl._audioUserSet = true;   // 标记用户手动设置过：之后切换�
         this._stopVideoTimer();   // 仅停 UI 计时器；后台任务与轮询继续
         this._flushClipSync();    // 先把挂起的提示词同步立即写盘，保证下面 render 拿到最新值
         this._tl = null; App.closeModal(); this.render(this.projectId);
+    },
+
+    // 生成视频前的二次确认：让用户确认/临时修改本次使用的「合成工作流」，确认后才真正提交。
+    // 注意：时间轴本身占用 #modalContent，这里用独立浮层覆盖在最上层，避免覆盖掉时间轴弹窗。
+    confirmGenVideo() {
+        const tl = this._tl;
+        if (!tl || !tl.imageClips.length) { App.showToast('请至少保留一个图像段', 'error'); return; }
+        // 已有进行中的浮层先移除，避免叠加
+        const old = document.getElementById('sbGenConfirmMask');
+        if (old) old.remove();
+        const cur = tl.workflow || 'director';
+        const mask = document.createElement('div');
+        mask.id = 'sbGenConfirmMask';
+        mask.className = 'sb-genconfirm-mask';
+        mask.innerHTML = `
+            <div class="sb-genconfirm-box">
+                <div class="modal-header"><h2 class="modal-title">🎬 确认合成视频</h2></div>
+                <div class="modal-body" style="padding:1rem 1.25rem">
+                    <p style="margin:0 0 .75rem;line-height:1.6">即将开始合成视频，请确认本次使用的<b>合成工作流</b>（可在此临时修改）：</p>
+                    <label class="sb-dir-selwrap" style="display:flex;align-items:center;gap:.5rem">
+                        <span style="white-space:nowrap">合成工作流</span>
+                        <span class="sb-dir-select" style="flex:1">
+                            <select id="sbGenConfirmWf" style="width:100%">
+                                <option value="director" ${cur === 'director' ? 'selected' : ''}>旧导演台 LTXDirector</option>
+                                <option value="singularity" ${cur === 'singularity' ? 'selected' : ''}>Singularity 乱神版V3</option>
+                            </select>
+                        </span>
+                    </label>
+                    <p style="margin:.75rem 0 0;font-size:.82rem;color:var(--text-secondary,#888)">提示：默认工作流可在「设置」中修改。</p>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn-secondary" onclick="StoryboardModule._closeGenConfirm()">取消</button>
+                    <button class="btn-primary" onclick="StoryboardModule._doConfirmGenVideo()">✅ 确认并生成</button>
+                </div>
+            </div>`;
+        document.body.appendChild(mask);
+    },
+
+    _closeGenConfirm() {
+        const m = document.getElementById('sbGenConfirmMask');
+        if (m) m.remove();
+    },
+
+    // 读取确认框里选定的工作流 → 写回时间轴（含下拉同步）→ 关闭浮层 → 真正提交
+    _doConfirmGenVideo() {
+        const sel = document.getElementById('sbGenConfirmWf');
+        if (sel && this._tl) {
+            const wf = (sel.value === 'singularity') ? 'singularity' : 'director';
+            this._tl.workflow = wf;
+            // 同步时间轴工具栏里的工作流下拉，保持显示一致
+            const tlSel = document.getElementById('tlWorkflow');
+            if (tlSel) tlSel.value = wf;
+        }
+        this._closeGenConfirm();
+        this.genVideo();
     },
 
     async genVideo() {

@@ -123,6 +123,26 @@ const SettingsModule = {
         </div>
 
         <div class="settings-section">
+            <h2 class="settings-section-title">🎬 合成视频默认</h2>
+            <div class="form-row">
+                <div class="form-col">
+                    <label class="form-label">默认合成工作流</label>
+                    <select class="form-input" id="vdWorkflow" onchange="SettingsModule.saveVideoDefaults()">
+                        <option value="director" ${(s.videoDefaults||{}).workflow==='singularity'?'':'selected'}>旧导演台 LTXDirector</option>
+                        <option value="singularity" ${(s.videoDefaults||{}).workflow==='singularity'?'selected':''}>Singularity 乱神版V3</option>
+                    </select>
+                </div>
+                <div class="form-col">
+                    <label class="form-label">默认 Epsilon（过渡柔和度）</label>
+                    <input type="number" class="form-input" id="vdEpsilon" min="0.001" max="1" step="0.001"
+                        value="${Number.isFinite(+(s.videoDefaults||{}).epsilon) ? +(s.videoDefaults||{}).epsilon : 0.9}"
+                        onchange="SettingsModule.saveVideoDefaults()" placeholder="0.9">
+                </div>
+            </div>
+            <p class="form-hint">进入「合成视频」时间轴时作为初始值：合成工作流 <code>director</code>(旧导演台) / <code>singularity</code>(乱神版V3)；Epsilon 越小越接近硬切（0.001），越大转场越柔和（1.0）。进入时间轴后仍可临时调整，点「生成视频」时会再次确认工作流。</p>
+        </div>
+
+        <div class="settings-section">
             <div class="section-title-row">
                 <h2 class="settings-section-title">📝 全局提示词</h2>
                 <div class="section-title-actions">
@@ -245,6 +265,20 @@ const SettingsModule = {
             audioPadTailSec
         };
         Storage.saveSettings({ imageDefaults: defs });
+        this.flashSaved();
+    },
+
+    // 保存合成视频默认参数（默认合成工作流 + 默认 Epsilon），供 openTimeline 读取为初始值
+    saveVideoDefaults() {
+        const s = Storage.getSettings();
+        const wfRaw = (document.getElementById('vdWorkflow') || {}).value;
+        const workflow = (wfRaw === 'singularity') ? 'singularity' : 'director';
+        let epsilon = parseFloat((document.getElementById('vdEpsilon') || {}).value);
+        if (!Number.isFinite(epsilon)) epsilon = 0.9;
+        if (epsilon < 0.001) epsilon = 0.001;
+        if (epsilon > 1) epsilon = 1;
+        const videoDefaults = { ...(s.videoDefaults || {}), workflow, epsilon };
+        Storage.saveSettings({ videoDefaults });
         this.flashSaved();
     },
 
