@@ -209,11 +209,13 @@ const Storage = {
 - 写每个面板时，把对应 local_prompt 里的核心画面信息**全部落到画面上**：景别、机位、说话人在画面中的位置（左/右/中央/前景/后景）、主体动作、面部表情与手势、环境与光影。做到「看图就能对上那句 local」。
 - 严禁出现 local 里没有的人物/道具/动作，也不要漏掉 local 里明确写到的关键元素（如手机、武器、特定手势、视线方向）。
 - 画面信息要**丰富具体**：每个面板都要交代清楚——谁、在画面哪个位置、什么景别与机位、在做什么动作、什么表情、周围环境与主光源方向/色调。不要笼统一句「人物在说话」。
+- **只画看得见的东西**：四宫格是静态图，只能画「定格的姿态、表情、光影、构图」。严禁写抽象/心理/隐喻词（如「纯净无垢的笑」「沉浸在回忆里」「充满希望」），一律翻译成可见的面部表情与肢体姿态（如「嘴角微微上扬的浅笑、眼睛闭合、肩膀放松」）。也严禁否定式描述（「不是…而是…」），只画最终那个状态。情绪一律落到「脸上/身上能看到的具体特征」。
 
-【去字幕铁律 — 四宫格图严禁任何文字】
-- nano_banana_prompt 正文里必须明确写出「画面干净、无任何字幕、无对白文字、无字母、无水印、无logo、无UI、无标题卡」。
-- 即使有台词，台词只用于配音与对口型，**绝对不要把台词文字画进画面**；画面中人物可以张嘴说话，但不出现任何文字。
-- 负面要求里务必包含：no subtitles, no captions, no text, no letters, no words, no watermark, no logo, no caption bar。
+【去字幕铁律 — 四宫格图禁叠加字幕，但保留场景内真实文字】
+- 区分两类文字：① **叠加层文字**（字幕、对白文字、解说、标题卡、水印、logo、UI、下沿字幕条）—— **一律严禁**；② **场景内本应存在的真实文字**（如店铺招牌、路牌、报纸/书籍标题、手机/电脑屏幕显示、车牌、产品包装文字、墙上标语等）—— **允许自然出现**，作为环境真实感的一部分。
+- nano_banana_prompt 正文里必须明确写出「画面干净，不要任何叠加在画面上的字幕、对白文字、解说文字、标题卡、水印或 logo；但场景中本应存在的真实文字（招牌、路牌、报纸、屏幕显示、车牌、包装文字等）可以自然出现」。
+- 即使有台词，台词只用于配音与对口型，**绝对不要把台词文字以字幕形式画进画面**；画面中人物可以张嘴说话，但不出现叠加字幕。（注：手机/电脑屏幕里若剧情需要可显示文字内容，但不要把人物对白当字幕叠加。）
+- 负面要求里务必包含（只针对叠加层，不要再用 no text / no letters / no words 这种会误伤场景文字的笼统词）：subtitles, closed captions, caption bar, hardcoded subtitles, dialogue text overlay, on-screen text overlay, lower-third, title card, watermark, logo overlay。
 
 # 六、global_prompt 与 local_prompts（核心，决定成片质量）
 - global_prompt：单段连贯中文，融合该组 4 个 Shot 的整体视觉描述、场景基底、统一光源与风格（涉及幻想生物须含完整形态描述并在每段重复）。
@@ -223,6 +225,11 @@ const Storage = {
   【Singularity / OmniCine 提示词铁律 — 必看】
   ① **语言规则**：除「说话内容（对白）」保留中文外，**其余一律使用英文**。不要出现「**Character Prompt (for AI Image Generation):**」之类的任何标题/小标题，直接输出翻译后的自然语言描述。
   ② **自然语言、动作连贯**：用连贯的句子描述，不要罗列要素标签。
+  ⓿ **【可演化铁律 — 最高优先级，决定生成质量】视频模型只能渲染「看得见的动作、表情、光影」，无法渲染抽象概念、心理活动或隐喻。**
+     - **严禁抽象/心理/隐喻描述**：如「沉浸在无梦的深眠中」「没有记忆负担的笑容」「灵魂得到救赎」「内心五味杂陈」——这些必须翻译成**可见的面部动作/肢体动作/光影**。例：「无梦深眠」→ eyes closed, breathing slow and steady, facial muscles fully relaxed；「纯净的笑容」→ corners of the mouth slowly curl up into a soft gentle smile。
+     - **严禁否定式对比**：如「不是A的笑，不是B的笑，而是C」。模型不理解否定，反而会把 A、B 特征也画出来（负面污染）。**只描述最终呈现的那个状态**（C），用具体动作写出来。
+     - **情绪 → 可见信号**：高兴=嘴角上扬/眼睛微眯；恐惧=瞳孔放大/身体后缩/眉头紧锁；平静=面部放松/呼吸均匀/眼神放空。始终把情绪落到「脸上/身上能看到的具体变化」。
+     - **少用形容词堆叠**：同一含义不要反复换词说四遍（如 纯净/纯粹/无垢/无瑕）；说一次、说准即可，把 token 留给动作与光影。
   ③ **时间分段叙事**：在同一段里按时间推进描述「动作演变 + 运镜 + 光照 + 声音」，用英文时间标记，如 0-5 seconds, ... / 5-10 seconds, ... / 10-15 seconds, ...（秒数根据该 Shot 时长合理划分；短镜头可只用一个区间）。
   ④ **建议结构顺序**（全英文，自然衔接）：
      - 开头：场景与风格（如 Cinematic and realistic style, dynamic and fierce mood.）
@@ -256,7 +263,7 @@ const Storage = {
       "global_prompt": "该组整体视觉描述、场景基底与统一光源（中文单行）",
       "local_prompts": ["Cinematic and realistic style, calm preparation mood. 0-5 seconds, the man stops typing and stretches lazily at the desk, then raises his fist lightly with a smug grin. slow dolly in, medium shot, eye-level. Cool white daylight slants in from the left window, soft office ambience. 0-5 seconds，the man said：终于搞定了！Voice: relaxed and pleased, Pace: medium. quiet keyboard clicks, gentle room tone, precise lip-sync. film grain，无字幕", "Cinematic and realistic style, surprised tense mood. 0-5 seconds, the woman in the center suddenly looks up with widened eyes and pushes herself up from the desk with both hands. static camera, over-the-shoulder close-up, eye-level. Cold ambient office light, shallow depth of field. no character dialogue. sudden chair scrape, sharp room tone, tense BGM sting，无字幕", "面板3：同样的英文自然语言描述（动作+运镜+光照+声音），如有对白则 said：中文对白，无字幕", "面板4：同上英文自然语言描述，无字幕"],
       "shot_transitions": ["镜头由中景缓慢推近至近景，自然过渡，无字幕", "快速横摇切到对话另一方，无字幕", "光线渐暗淡入下一镜，无字幕", ""],
-      "nano_banana_prompt": "完整四宫格提示词（中文单行，含@图N声明）。4 个面板须逐一对应 local_prompts 第1/2/3/4项，把每项的景别/机位/位置/动作/表情/环境光影都画到对应面板上；正文结尾必须声明「画面干净、无任何字幕、无对白文字、无字母、无水印、无logo，每个面板16:9，2x2网格排列」",
+      "nano_banana_prompt": "完整四宫格提示词（中文单行，含@图N声明）。4 个面板须逐一对应 local_prompts 第1/2/3/4项，把每项的景别/机位/位置/动作/表情/环境光影都画到对应面板上；正文结尾必须声明「画面干净，不要任何叠加字幕/对白文字/标题卡/水印/logo，但场景内本应存在的真实文字（招牌/路牌/报纸/屏幕显示/车牌/包装文字）可自然出现，每个面板16:9，2x2网格排列」",
       "ref_assets": [
         { "idx": 1, "type": "character", "name": "角色1名" },
         { "idx": 2, "type": "prop", "name": "道具名" },
@@ -268,13 +275,13 @@ const Storage = {
         { "panel": 3, "character": "", "text": "", "tone": "" },
         { "panel": 4, "character": "", "text": "", "tone": "" }
       ],
-      "negative_prompt": "英文负面词：subtitles, captions, caption bar, text, letters, words, on-screen text, dialogue text, watermark, logo, UI, title card, worst quality, blurry, distorted face, deformed, extra fingers, bad anatomy, text overlay, multiple panels overlap, split screen artifacts, picture-in-picture, frame within frame。涉及幻想生物追加其现实形态反义词。",
+      "negative_prompt": "英文负面词（只禁叠加层文字，保留场景内真实文字如招牌/屏幕/报纸）：subtitles, closed captions, caption bar, hardcoded subtitles, dialogue text overlay, on-screen text overlay, lower-third, title card, watermark, logo overlay, UI overlay, worst quality, blurry, distorted face, deformed, extra fingers, bad anatomy, multiple panels overlap, split screen artifacts, picture-in-picture, frame within frame。涉及幻想生物追加其现实形态反义词。",
       "transition": "本组结束到下一组的转场建议：cut(硬切) / smooth(平滑过渡) / fade(淡入淡出)"
     }
   }
 }
 
-规则：所有字符串单行无换行；local_prompts 适配 Singularity/OmniCine：**除中文对白外一律英文自然语言**、不要任何标题（如 **Character Prompt...**）、动作连贯、按时间分段（如 0-5 seconds / 5-10 seconds，依镜头时长划分）、依次自然衔接「场景风格→动作→运镜构图→光照色调→对白→声音设计→质感」；对白格式为「英文说话人 said：中文对白原文」（冒号后中文原文，严禁翻译成英文、严禁加引号、严禁换行、严禁出现 [Surprise-wa] 等配音标签），无对白写 no character dialogue；local_prompts 固定 4 项、每项末尾带「无字幕」；nano_banana_prompt 的 4 个面板必须与 local_prompts 第1/2/3/4项逐一对应（同序、同画面内容），并在正文中明确声明「画面干净、无字幕、无任何文字/字母/水印/logo」；shot_transitions 固定 4 项（最后一项可空，其余末尾带「无字幕」）；dialogues 固定 4 项（无台词的面板字段留空，text 可按情绪偶尔点缀配音情绪标签如 [Surprise-wa]/[Confirmation-en]）；配音情绪标签**只允许出现在 dialogues[].text**，严禁出现在 local_prompts/global_prompt/nano_banana_prompt/shot_transitions 等画面提示词中；幻想生物形态描述完整。`,
+规则：所有字符串单行无换行；local_prompts 适配 Singularity/OmniCine：**除中文对白外一律英文自然语言**、不要任何标题（如 **Character Prompt...**）、动作连贯、按时间分段（如 0-5 seconds / 5-10 seconds，依镜头时长划分）、依次自然衔接「场景风格→动作→运镜构图→光照色调→对白→声音设计→质感」；对白格式为「英文说话人 said：中文对白原文」（冒号后中文原文，严禁翻译成英文、严禁加引号、严禁换行、严禁出现 [Surprise-wa] 等配音标签），无对白写 no character dialogue；local_prompts 固定 4 项、每项末尾带「无字幕」；nano_banana_prompt 的 4 个面板必须与 local_prompts 第1/2/3/4项逐一对应（同序、同画面内容），并在正文中明确声明「画面干净、不要叠加字幕/对白文字/标题卡/水印/logo，但场景内真实文字（招牌/屏幕/报纸等）可自然出现」；shot_transitions 固定 4 项（最后一项可空，其余末尾带「无字幕」）；dialogues 固定 4 项（无台词的面板字段留空，text 可按情绪偶尔点缀配音情绪标签如 [Surprise-wa]/[Confirmation-en]）；配音情绪标签**只允许出现在 dialogues[].text**，严禁出现在 local_prompts/global_prompt/nano_banana_prompt/shot_transitions 等画面提示词中；幻想生物形态描述完整。`,
             voiceSettings: { textTemplate: "我是{name}，这是我的音色，很高兴认识你", cloneWorkflow: 'vocpm' },
             imageApiGroups: [
                 {
