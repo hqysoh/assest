@@ -306,6 +306,29 @@ const Storage = {
         return this.getProjects().find(p => p.id === id);
     },
 
+    // 从后端重新拉取单个项目的最新数据，覆盖内存与本地缓存。
+    // 用于「手动刷新」拿到在别处（如 ComfyUI 合成完成、另一标签页）写入的新数据，
+    // 而不必整页刷新。失败时保持现有内存数据不变并返回原对象。
+    async reloadProject(id) {
+        try {
+            const r = await (await fetch(this.API + '/api/projects/load', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id })
+            })).json();
+            if (r && r.success && r.project) {
+                if (!this._data) this._data = { projects: [], settings: {} };
+                const arr = this._data.projects || (this._data.projects = []);
+                const idx = arr.findIndex(p => p.id === id);
+                if (idx !== -1) arr[idx] = r.project; else arr.push(r.project);
+                try { localStorage.setItem('assest_project_' + id, JSON.stringify(r.project)); } catch (e) {}
+                return r.project;
+            }
+        } catch (e) {
+            console.warn('Storage: 重新加载项目失败 ' + id, e && e.message);
+        }
+        return this.getProject(id);
+    },
+
     createProject(name) {
         const ps = this.getProjects();
         const np = {

@@ -4667,50 +4667,53 @@ this._tl._audioUserSet = true;   // 标记用户手动设置过：之后切换�
             return;
         }
         const canDrag = (sortMode === 'custom');
-        const rows = list.map(v => {
-            const name = this._vhDisplayName(v);
-            const fname = `${name}.mp4`.replace(/[\\/:*?"<>|]/g, '_');
-            const url = this._videoFileUrl(v.file);
-            const missing = !v.file;
-            const when = v.createdAt ? new Date(v.createdAt).toLocaleString() : '';
-            const watched = !!v.watched;
-            const tag = v.imported ? ' <span class="sb-vh-tag sb-vh-tag-imp">导入</span>' : '';
-            const mime = /\.webm$/i.test(fname) ? 'video/webm' : /\.mov$/i.test(fname) ? 'video/quicktime' : /\.gif$/i.test(fname) ? 'image/gif' : 'video/mp4';
-            // 视频画面本身可拖出到剪辑软件（DownloadURL）；controls 仍可点击播放
-            const videoEl = (!missing && url)
-                ? `<video class="sb-vh-video" controls preload="metadata" src="${url}" draggable="true"
-                       ondragstart="App.onAudioDragStart(event, '${url.replace(/'/g, "\\'")}', '${fname.replace(/'/g, "\\'")}', '${mime}')"
-                       title="按住画面拖到剪辑软件/桌面即可导出该视频"></video>`
-                : `<div class="sb-vh-missing">⚠️ 未索引到视频文件（可能 ComfyUI 输出已清理或非同机）</div>`;
-            // 删除移到右上角
-            const delBtn = `<button class="sb-vh-del" onclick="StoryboardModule.delVideoHistory('${v.id}')" title="从历史中删除（仅移除索引记录，不会删除磁盘上的原视频文件）">✕</button>`;
-            // 手动拖拽排序把手
-            const handle = canDrag
-                ? `<span class="sb-vh-handle" draggable="true"
-                       ondragstart="StoryboardModule.onVhSortDragStart(event,'${v.id}')"
-                       title="按住拖拽调整顺序">⠿</span>`
-                : '';
-            return `<div class="sb-vh-card ${watched ? 'is-watched' : ''}" data-vid="${v.id}"
-                    ${canDrag ? `ondragover="StoryboardModule.onVhSortDragOver(event)" ondrop="StoryboardModule.onVhSortDrop(event,'${v.id}')" ondragleave="this.classList.remove('vh-drop-target')"` : ''}>
-                <div class="sb-vh-thumb">
-                    ${handle}
-                    ${delBtn}
-                    ${videoEl}
-                </div>
-                <div class="sb-vh-meta">
-                    <div class="sb-vh-name" title="${this.esc(v.file || '')}">${this.esc(name)}${tag}${watched ? ' <span class="sb-vh-tag sb-vh-tag-watched">已看</span>' : ''}</div>
-                    <div class="sb-vh-sub">${v.frames ? v.frames + ' 帧 · ' : ''}${when}</div>
-                    <div class="sb-vh-acts">
-                        ${(!missing && url) ? App.videoDragHandle(url, fname, '拖到剪辑软件') : ''}
-                        <button class="btn-ghost btn-tiny" onclick="StoryboardModule.renameVideoHistory('${v.id}')" title="重命名：自定义该视频的显示名（同时影响拖出的文件名）">✏️ 重命名</button>
-                        ${(!missing) ? `<button class="btn-ghost btn-tiny" onclick="StoryboardModule.openVideoPath('${v.id}')" title="在系统文件管理器中定位该视频文件（需 backend 与浏览器同机）">📂 打开路径</button>` : ''}
-                        <button class="btn-ghost btn-tiny sb-vh-markbtn ${watched ? 'on' : ''}" onclick="StoryboardModule.toggleVideoWatched('${v.id}')" title="标记为已看：点击后本卡片置灰，便于区分哪些已播放（可再次点击取消）">${watched ? '↺ 标记已看' : '✓ 标记已看'}</button>
-                    </div>
-                </div>
-            </div>`;
-        }).join('');
+        const rows = list.map(v => this._vhCardHtml(v, canDrag)).join('');
 
         host.innerHTML = head + rootOpen + `<div class="sb-vh-grid">${rows}</div>` + rootClose;
+    },
+
+    // 生成单个视频历史卡片的 HTML（renderVideoHistory 与增量刷新共用）
+    _vhCardHtml(v, canDrag) {
+        const name = this._vhDisplayName(v);
+        const fname = `${name}.mp4`.replace(/[\\/:*?"<>|]/g, '_');
+        const url = this._videoFileUrl(v.file);
+        const missing = !v.file;
+        const when = v.createdAt ? new Date(v.createdAt).toLocaleString() : '';
+        const watched = !!v.watched;
+        const tag = v.imported ? ' <span class="sb-vh-tag sb-vh-tag-imp">导入</span>' : '';
+        const mime = /\.webm$/i.test(fname) ? 'video/webm' : /\.mov$/i.test(fname) ? 'video/quicktime' : /\.gif$/i.test(fname) ? 'image/gif' : 'video/mp4';
+        // 视频画面本身可拖出到剪辑软件（DownloadURL）；controls 仍可点击播放
+        const videoEl = (!missing && url)
+            ? `<video class="sb-vh-video" controls preload="metadata" src="${url}" draggable="true"
+                   ondragstart="App.onAudioDragStart(event, '${url.replace(/'/g, "\\'")}', '${fname.replace(/'/g, "\\'")}', '${mime}')"
+                   title="按住画面拖到剪辑软件/桌面即可导出该视频"></video>`
+            : `<div class="sb-vh-missing">⚠️ 未索引到视频文件（可能 ComfyUI 输出已清理或非同机）</div>`;
+        // 删除移到右上角
+        const delBtn = `<button class="sb-vh-del" onclick="StoryboardModule.delVideoHistory('${v.id}')" title="从历史中删除（仅移除索引记录，不会删除磁盘上的原视频文件）">✕</button>`;
+        // 手动拖拽排序把手
+        const handle = canDrag
+            ? `<span class="sb-vh-handle" draggable="true"
+                   ondragstart="StoryboardModule.onVhSortDragStart(event,'${v.id}')"
+                   title="按住拖拽调整顺序">⠿</span>`
+            : '';
+        return `<div class="sb-vh-card ${watched ? 'is-watched' : ''}" data-vid="${v.id}"
+                ${canDrag ? `ondragover="StoryboardModule.onVhSortDragOver(event)" ondrop="StoryboardModule.onVhSortDrop(event,'${v.id}')" ondragleave="this.classList.remove('vh-drop-target')"` : ''}>
+            <div class="sb-vh-thumb">
+                ${handle}
+                ${delBtn}
+                ${videoEl}
+            </div>
+            <div class="sb-vh-meta">
+                <div class="sb-vh-name" title="${this.esc(v.file || '')}">${this.esc(name)}${tag}${watched ? ' <span class="sb-vh-tag sb-vh-tag-watched">已看</span>' : ''}</div>
+                <div class="sb-vh-sub">${v.frames ? v.frames + ' 帧 · ' : ''}${when}</div>
+                <div class="sb-vh-acts">
+                    ${(!missing && url) ? App.videoDragHandle(url, fname, '拖到剪辑软件') : ''}
+                    <button class="btn-ghost btn-tiny" onclick="StoryboardModule.renameVideoHistory('${v.id}')" title="重命名：自定义该视频的显示名（同时影响拖出的文件名）">✏️ 重命名</button>
+                    ${(!missing) ? `<button class="btn-ghost btn-tiny" onclick="StoryboardModule.openVideoPath('${v.id}')" title="在系统文件管理器中定位该视频文件（需 backend 与浏览器同机）">📂 打开路径</button>` : ''}
+                    <button class="btn-ghost btn-tiny sb-vh-markbtn ${watched ? 'on' : ''}" onclick="StoryboardModule.toggleVideoWatched('${v.id}')" title="标记为已看：点击后本卡片置灰，便于区分哪些已播放（可再次点击取消）">${watched ? '↺ 标记已看' : '✓ 标记已看'}</button>
+                </div>
+            </div>
+        </div>`;
     },
 
     // 整界面拖入：仅在拖拽的是文件（含 Files）时高亮 + 接收，避免拖出视频/排序拖拽误触发
@@ -4824,10 +4827,63 @@ this._tl._audioUserSet = true;   // 标记用户手动设置过：之后切换�
     },
 
     // 手动刷新视频历史：重新从最新工程读取记录并重渲染（重新校验文件可用性、刷新缩略/排序）
-    refreshVideoHistory() {
-        this.renderVideoHistory(this.projectId);
-        App.showToast('已刷新视频历史', 'success');
-    },
+async refreshVideoHistory() {
+const pid = this.projectId;
+// 1. 先从后端重新拉取最新项目数据（拿到别处合成/新增的视频），不整页刷新
+await Storage.reloadProject(pid);
+// 2. 增量更新 DOM：只插入新出现的视频、移除已删除的，已有 <video> 完全不动（避免全部重新加载）
+const added = this._incrementalRenderVideoHistory(pid);
+App.showToast(added > 0 ? `已刷新，新增 ${added} 个视频` : '已是最新，无新增视频', 'success');
+},
+
+// 增量刷新视频历史：对比最新列表与当前 DOM，仅新增/移除变化的卡片。
+// 返回新增数量。若结构不存在（如当前不在视频 tab 或排序为手动）则回退整页渲染。
+_incrementalRenderVideoHistory(pid) {
+const p = Storage.getProject(pid);
+const grid = document.querySelector('.sb-vh-grid');
+const sortMode = p.vhSort || 'time';
+const sortDir = p.vhSortDir || 'asc';
+// 手动排序模式涉及拖拽顺序，且 grid 不存在（空态/未在该 tab）时，直接整页渲染
+if (!grid || sortMode === 'custom') {
+this.renderVideoHistory(pid);
+return 0;
+}
+const list = Array.isArray(p.storyboardVideos) ? p.storyboardVideos.slice() : [];
+this._vhSortList(list, sortMode, sortDir);
+const latestIds = list.map(v => String(v.id));
+const latestSet = new Set(latestIds);
+
+// 移除 DOM 中已不存在于最新列表的卡片
+const existing = new Map();
+grid.querySelectorAll('.sb-vh-card').forEach(card => {
+const vid = card.getAttribute('data-vid');
+if (!latestSet.has(vid)) { card.remove(); }
+else { existing.set(vid, card); }
+});
+
+const canDrag = (sortMode === 'custom');
+let added = 0;
+// 按最新顺序重排：已存在的复用原节点（不重建 video），缺失的新建插入
+let prev = null;
+for (const v of list) {
+const vid = String(v.id);
+let card = existing.get(vid);
+if (!card) {
+const tmp = document.createElement('div');
+tmp.innerHTML = this._vhCardHtml(v, canDrag).trim();
+card = tmp.firstElementChild;
+added++;
+}
+// 按顺序放置到 prev 之后（insertBefore 移动已存在节点不会重置 video 播放状态）
+if (prev) {
+if (prev.nextElementSibling !== card) grid.insertBefore(card, prev.nextElementSibling);
+} else {
+if (grid.firstElementChild !== card) grid.insertBefore(card, grid.firstElementChild);
+}
+prev = card;
+}
+return added;
+},
 
     delVideoHistory(id) {
         const p = Storage.getProject(this.projectId);
