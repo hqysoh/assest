@@ -4696,7 +4696,7 @@ this._tl._audioUserSet = true;   // 标记用户手动设置过：之后切换�
                     ${videoEl}
                 </div>
                 <div class="sb-vh-meta">
-                    <div class="sb-vh-name" title="${this.esc(v.file || '')}">${this.esc(name)}${tag}${watched ? ' <span class="sb-vh-tag">已看</span>' : ''}</div>
+                    <div class="sb-vh-name" title="${this.esc(v.file || '')}">${this.esc(name)}${tag}${watched ? ' <span class="sb-vh-tag sb-vh-tag-watched">已看</span>' : ''}</div>
                     <div class="sb-vh-sub">${v.frames ? v.frames + ' 帧 · ' : ''}${when}</div>
                     <div class="sb-vh-acts">
                         ${(!missing && url) ? App.videoDragHandle(url, fname, '拖到剪辑软件') : ''}
@@ -4835,8 +4835,29 @@ this._tl._audioUserSet = true;   // 标记用户手动设置过：之后切换�
         if (!v) return;
         v.watched = !v.watched;
         Storage.updateProject(this.projectId, { storyboardVideos: list });
-        if (typeof ProjectModule !== 'undefined' && ProjectModule.currentTab === 'videos') {
-            this.renderVideoHistory(this.projectId);
+        // 只局部更新该卡片 DOM（切换置灰样式 / 按钮文案 / 已看标签），不整页重渲染——
+        // 整页 renderVideoHistory 会重建所有 <video>，触发全部视频重新加载，非常慢。
+        const card = document.querySelector(`.sb-vh-card[data-vid="${id}"]`);
+        if (!card) return;
+        card.classList.toggle('is-watched', !!v.watched);
+        const btn = card.querySelector('.sb-vh-markbtn');
+        if (btn) {
+            btn.classList.toggle('on', !!v.watched);
+            btn.textContent = v.watched ? '↺ 标记已看' : '✓ 标记已看';
+        }
+        // 名称行末尾的「已看」小标签：有则按需移除/添加
+        const nameEl = card.querySelector('.sb-vh-name');
+        if (nameEl) {
+            const tagEl = nameEl.querySelector('.sb-vh-tag-watched');
+            if (v.watched && !tagEl) {
+                const s = document.createElement('span');
+                s.className = 'sb-vh-tag sb-vh-tag-watched';
+                s.textContent = '已看';
+                nameEl.appendChild(document.createTextNode(' '));
+                nameEl.appendChild(s);
+            } else if (!v.watched && tagEl) {
+                tagEl.remove();
+            }
         }
     },
 
