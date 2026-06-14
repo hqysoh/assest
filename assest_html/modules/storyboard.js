@@ -4632,8 +4632,9 @@ this._tl._audioUserSet = true;   // 标记用户手动设置过：之后切换�
         this.projectId = projectId;
         const p = Storage.getProject(projectId);
         const list = Array.isArray(p.storyboardVideos) ? p.storyboardVideos.slice() : [];
-        const sortMode = p.vhSort || 'custom';   // custom 手动拖拽 / time 生成时间 / name 名称
-        this._vhSortList(list, sortMode);
+        const sortMode = p.vhSort || 'time';   // custom 手动拖拽 / time 生成时间 / name 名称（默认按生成时间）
+        const sortDir = p.vhSortDir || 'asc';  // asc 正序（旧→新）/ desc 倒序（新→旧），默认正序
+        this._vhSortList(list, sortMode, sortDir);
 
         const host = document.getElementById('tabContent');
         const head = `
@@ -4649,6 +4650,7 @@ this._tl._audioUserSet = true;   // 标记用户手动设置过：之后切换�
                         <option value="name" ${sortMode === 'name' ? 'selected' : ''}>名称</option>
                     </select>
                 </label>
+                ${(sortMode === 'time' || sortMode === 'name') ? `<button class="btn-secondary btn-tiny" onclick="StoryboardModule.toggleVhSortDir()" title="切换正序 / 倒序">${sortDir === 'desc' ? '⬇️ 倒序' : '⬆️ 正序'}</button>` : ''}
             </div>`;
 
         // 整个历史 tab 作为拖放导入区：拖入文件时整界面高亮（拖出/排序不带 Files，不会误触发）
@@ -4731,11 +4733,13 @@ this._tl._audioUserSet = true;   // 标记用户手动设置过：之后切换�
     },
 
     // 按当前排序模式对列表排序（custom 用 order，缺省回退到原分镜组顺序）
-    _vhSortList(list, mode) {
+    // dir：'asc' 正序 / 'desc' 倒序（仅对 time / name 生效）
+    _vhSortList(list, mode, dir) {
+        const sign = (dir === 'desc') ? -1 : 1;
         if (mode === 'time') {
-            list.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));   // 新→旧
+            list.sort((a, b) => sign * ((a.createdAt || 0) - (b.createdAt || 0)));   // asc：旧→新
         } else if (mode === 'name') {
-            list.sort((a, b) => this._vhDisplayName(a).localeCompare(this._vhDisplayName(b), 'zh-Hans-CN'));
+            list.sort((a, b) => sign * this._vhDisplayName(a).localeCompare(this._vhDisplayName(b), 'zh-Hans-CN'));
         } else {
             // custom：优先 order 字段；无 order 的回退到「分镜组号→seq→时间」
             list.sort((a, b) => {
@@ -4752,6 +4756,14 @@ this._tl._audioUserSet = true;   // 标记用户手动设置过：之后切换�
     // 切换排序方式
     setVhSort(mode) {
         Storage.updateProject(this.projectId, { vhSort: mode });
+        this.renderVideoHistory(this.projectId);
+    },
+
+    // 切换正序 / 倒序（asc ↔ desc），仅对 生成时间 / 名称 生效
+    toggleVhSortDir() {
+        const p = Storage.getProject(this.projectId);
+        const next = (p.vhSortDir === 'desc') ? 'asc' : 'desc';
+        Storage.updateProject(this.projectId, { vhSortDir: next });
         this.renderVideoHistory(this.projectId);
     },
 
