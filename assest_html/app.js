@@ -190,10 +190,15 @@ const App = {
                 u.searchParams.set('dl', filename);
                 dlAbs = u.href;
             } catch (e) { /* 非标准 URL 时退回原地址 */ }
-            dt.effectAllowed = 'copy';
-            // 关键：DownloadURL → 拖出到外部应用时按此下载为文件
-            dt.setData('DownloadURL', `${m}:${filename}:${dlAbs}`);
-            // 兼容：拖到支持 URL/文本的目标
+            // DownloadURL 里的文件名用 ASCII 安全名：部分 Chromium 对含中文/特殊字符的 DownloadURL
+            // 文件名解析会失败，导致整条 DownloadURL 失效、拖出无反应。真正落地的文件名由后端
+            // Content-Disposition（dl 参数，支持中文）决定，所以这里安全名不影响最终命名。
+            const ext = (filename.match(/\.[a-zA-Z0-9]+$/) || ['.dat'])[0];
+            const asciiName = (filename.replace(/[^\x20-\x7E]/g, '_').replace(/\s+/g, '_')) || ('download' + ext);
+            dt.effectAllowed = 'copyMove';
+            // 关键：DownloadURL → 拖出到外部应用时按此下载为文件（Chrome/Edge）
+            dt.setData('DownloadURL', `${m}:${asciiName}:${dlAbs}`);
+            // 兼容：拖到支持 URL/文本的目标（含 Finder/部分软件）
             dt.setData('text/uri-list', dlAbs);
             dt.setData('text/plain', dlAbs);
         } catch (e) { /* 忽略：不影响页面其它交互 */ }

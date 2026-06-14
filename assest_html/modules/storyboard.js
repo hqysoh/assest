@@ -4699,6 +4699,7 @@ this._tl._audioUserSet = true;   // 标记用户手动设置过：之后切换�
                     <div class="sb-vh-name" title="${this.esc(v.file || '')}">${this.esc(name)}${tag}${watched ? ' <span class="sb-vh-tag">已看</span>' : ''}</div>
                     <div class="sb-vh-sub">${v.frames ? v.frames + ' 帧 · ' : ''}${when}</div>
                     <div class="sb-vh-acts">
+                        ${(!missing && url) ? App.videoDragHandle(url, fname, '拖到剪辑软件') : ''}
                         <button class="btn-ghost btn-tiny" onclick="StoryboardModule.renameVideoHistory('${v.id}')" title="重命名：自定义该视频的显示名（同时影响拖出的文件名）">✏️ 重命名</button>
                         ${(!missing) ? `<button class="btn-ghost btn-tiny" onclick="StoryboardModule.openVideoPath('${v.id}')" title="在系统文件管理器中定位该视频文件（需 backend 与浏览器同机）">📂 打开路径</button>` : ''}
                         <button class="btn-ghost btn-tiny sb-vh-markbtn ${watched ? 'on' : ''}" onclick="StoryboardModule.toggleVideoWatched('${v.id}')" title="标记为已看：点击后本卡片置灰，便于区分哪些已播放（可再次点击取消）">${watched ? '↺ 标记已看' : '✓ 标记已看'}</button>
