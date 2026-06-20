@@ -228,27 +228,7 @@ const SettingsModule = {
             </div>
             <label class="form-label-sm">模型列表（逗号分隔）</label>
             <input class="form-input" value="${this.esc((g.models||[]).join(', '))}" placeholder="dall-e-3, gpt-image-2" onchange="SettingsModule.updateGroupField('${g.id}','models',this.value.split(',').map(m=>m.trim()).filter(m=>m))">
-            <div class="form-hint" style="margin-top:0.35rem;line-height:1.6">
-                💡 使用<b>速创API（wuyinkeji）</b>时：地址填 <code>https://api.wuyinkeji.com</code>，Key 填速创API 密钥，模型可填
-                <code>image_nanoBanana2</code> / <code>image_nanoBanana_pro</code> / <code>image_nanoBanana</code> / <code>gpt-image-2</code> / <code>wan2.7</code>，
-                系统会自动走其异步接口（参考图照常生效）。
-                <button class="btn-ghost btn-tiny" style="margin-left:0.4rem" onclick="SettingsModule.applyWuyinPreset('${g.id}')">⚡ 一键填入速创API</button>
-            </div>
         </div>`;
-    },
-
-    // 一键把当前分组填成速创API 预设（保留已有 Key，不覆盖）
-    applyWuyinPreset(gid) {
-        const s = Storage.getSettings();
-        const groups = s.imageApiGroups || [];
-        const g = groups.find(x => x.id === gid);
-        if (!g) return;
-        g.url = 'https://api.wuyinkeji.com';
-        g.models = ['image_nanoBanana2', 'image_nanoBanana_pro', 'image_nanoBanana', 'gpt-image-2', 'wan2.7'];
-        if (!g.name || g.name === '新分组') g.name = '速创API';
-        Storage.saveSettings({ imageApiGroups: groups });
-        this.render();
-        App.showToast('已填入速创API 预设，请补填 API Key', 'success');
     },
 
     // ====== 自动保存（字段级，立即持久化到 localStorage + 后端） ======
