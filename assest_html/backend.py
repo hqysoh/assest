@@ -1230,6 +1230,26 @@ def _convert_ui_workflow_to_api(ui_wf):
     return None
 
 
+def _parse_video_resolution(resolution):
+    """把前端的视频分辨率字符串解析为 (width, height, label)。
+    入参形如 "1280 x 720 (16:9)" / "480 x 832 (9:16)"，宽高会向下取整到 32 的倍数
+    （LTXV/LTXDirector 要求边长可被 32 整除，否则报错或被回退）。
+    解析失败时回退默认 1280x720。返回的 label 用于写回时间轴 resolution 字段。"""
+    default_w, default_h = 1280, 720
+    s = (resolution or '').strip()
+    m = re.match(r'^\s*(\d+)\s*[x×]\s*(\d+)', s)
+    if m:
+        w, h = int(m.group(1)), int(m.group(2))
+    else:
+        w, h = default_w, default_h
+    # 对齐到 32 的倍数（最小 32），避免 ComfyUI 边长非法
+    w = max(32, (w // 32) * 32)
+    h = max(32, (h // 32) * 32)
+    # label 优先沿用原字符串（含比例标注），便于乱神版时间轴 resolution 完全一致
+    label = s if m else f'{default_w} x {default_h} (16:9)'
+    return w, h, label
+
+
 def run_director_singularity_sync(params, task_id=None):
     """Singularity（乱神版 V3）导演台视频生成。
 
@@ -1377,10 +1397,15 @@ def run_director_singularity_sync(params, task_id=None):
     # Stage 种子、Using Editor Audio 等）全部沿用工作流 JSON 原值，最大程度对齐 ComfyUI 图形界面，
     # 便于排查末尾异常画面。
     # 注：原先还会注入 global_prompt 与随机化 Stage 种子，现按需求一并去掉。
+    # 生成视频分辨率：写入 easy timelineEditor 的 resolution 字段（格式「宽 x 高 (比例)」），
+    # 该节点据此决定时间轴输出尺寸，下游 EmptyLTXVLatentVideo 自动跟随。
+    _vw, _vh, _vres_label = _parse_video_resolution(params.get('resolution'))
     for nid, node in workflow.items():
         ct = node.get('class_type')
         if ct == 'easy timelineEditor':
             node['inputs']['timeline_data'] = timeline_data
+            node['inputs']['resolution'] = _vres_label
+    print(f"[Singularity] resolution={_vres_label} ({_vw}x{_vh})")
 
     # 注：原先这里有一段对 LTX2SamplingPreviewOverride（采样实时预览节点）的剪枝逻辑——
     # 因后端经 /api/prompt 提交、无前端会话，该节点推预览会崩。现工作流已在 ComfyUI 里
@@ -1608,6 +1633,8 @@ def run_director_sync(params, task_id=None):
 
     timeline_data = json.dumps({'segments': timeline_segments, 'audioSegments': audio_segments}, ensure_ascii=False)
 
+    # 生成视频分辨率：旧导演台无 resolution 字段，解析出宽高写入 LTXDirector 的 custom_width/height
+    _vw, _vh, _vres_label = _parse_video_resolution(params.get('resolution'))
     # 注入 LTXDirector 节点（兼容改名后的 LTXDirectorPlus 与原版 LTXDirector）
     for nid, node in workflow.items():
         if node.get('class_type') in ('LTXDirectorPlus', 'LTXDirector'):
@@ -1616,6 +1643,12 @@ def run_director_sync(params, task_id=None):
             inp['duration_frames'] = total_frames
             inp['duration_seconds'] = round(total_frames / fps, 2)
             inp['timeline_data'] = timeline_data
+            # 分辨率（仅在节点本就含该字段时写入，避免给无该参数的节点塞非法 key）
+            if 'custom_width' in inp:
+                inp['custom_width'] = _vw
+            if 'custom_height' in inp:
+                inp['custom_height'] = _vh
+            print(f"[Director] resolution={_vres_label} -> custom {_vw}x{_vh}")
             # LTXDirector 用竖线 | 分隔各段 local prompt（见节点源码 _encode_relay）
             inp['local_prompts'] = " | ".join((lp or '画面') for lp in local_prompts)
             inp['segment_lengths'] = ",".join(seg_lengths)
@@ -2228,6 +2261,8 @@ class Handler(BaseHTTPRequestHandler):
                 'fps': d.get('fps', 30),
                 # 选择导演台工作流：'director'(默认，旧 LTXDirector) | 'singularity'(乱神版 V3)
                 'workflow': (d.get('workflow') or 'director'),
+                # 生成视频分辨率（格式「宽 x 高 (比例)」），由各工作流 runner 注入对应节点
+                'resolution': (d.get('resolution') or '1280 x 720 (16:9)'),
             }
             has_new = bool(params.get('imageSegments')) or bool(params.get('audioSegments'))
             if not params['segments'] and not has_new:

@@ -3177,6 +3177,8 @@ emotions: this._collectEmotions(),
                 // Epsilon / 合成工作流：默认值取自设置（settings.videoDefaults），可在时间轴弹窗内临时改动
                 epsilon: (Storage.getSettings().videoDefaults || {}).epsilon ?? 0.9,
                 workflow: (Storage.getSettings().videoDefaults || {}).workflow || 'director',
+                // 生成视频分辨率（格式「宽 x 高 (比例)」），默认取设置，后端按工作流注入
+                resolution: (Storage.getSettings().videoDefaults || {}).resolution || '1280 x 720 (16:9)',
                 // 使用音频：ON=用上传音频；OFF=让模型按提示词从零生成音频（含环境音）。
                 // 两个工作流（乱神版/旧导演台）均默认关闭（由模型从零生成音频）。
                 useCustomAudio: false,
@@ -4413,6 +4415,7 @@ this._tl._audioUserSet = true;   // 标记用户手动设置过：之后切换�
                 use_custom_audio: (tl.useCustomAudio !== false) && audioSegments.length > 0,
                 fps: tl.fps,
                 workflow: tl.workflow || 'director',   // 导演台工作流：director(默认) | singularity
+                resolution: tl.resolution || '1280 x 720 (16:9)',   // 生成视频分辨率
             });
             if (!submit.success || !submit.task_id) throw new Error(submit.error || '提交失败');
             // 持久化任务：关弹窗 / 刷新后仍可恢复计时与轮询

@@ -149,7 +149,13 @@ const SettingsModule = {
                         onchange="SettingsModule.saveVideoDefaults()" placeholder="0.9">
                 </div>
             </div>
-            <p class="form-hint">进入「合成视频」时间轴时作为初始值：合成工作流 <code>director</code>(旧导演台) / <code>singularity</code>(乱神版V3)；Epsilon 越小越接近硬切（0.001），越大转场越柔和（1.0）。进入时间轴后仍可临时调整，点「生成视频」时会再次确认工作流。</p>
+            <div class="form-row">
+                <div class="form-col">
+                    <label class="form-label">生成视频分辨率</label>
+                    <select class="form-input" id="vdResolution" onchange="SettingsModule.saveVideoDefaults()">${this.videoResOpts((s.videoDefaults||{}).resolution || '1280 x 720 (16:9)')}</select>
+                </div>
+            </div>
+            <p class="form-hint">进入「合成视频」时间轴时作为初始值：合成工作流 <code>director</code>(旧导演台) / <code>singularity</code>(乱神版V3)；Epsilon 越小越接近硬切（0.001），越大转场越柔和（1.0）；分辨率右侧标注横/竖屏与画面比例（乱神版V3 写入时间轴 resolution，旧导演台换算为 custom_width/height）。进入时间轴后仍可临时调整，点「生成视频」时会再次确认工作流。</p>
         </div>
 
         <div class="settings-section">
@@ -296,7 +302,8 @@ const SettingsModule = {
         if (!Number.isFinite(epsilon)) epsilon = 0.9;
         if (epsilon < 0.001) epsilon = 0.001;
         if (epsilon > 1) epsilon = 1;
-        const videoDefaults = { ...(s.videoDefaults || {}), workflow, epsilon };
+        const resolution = ((document.getElementById('vdResolution') || {}).value) || '1280 x 720 (16:9)';
+        const videoDefaults = { ...(s.videoDefaults || {}), workflow, epsilon, resolution };
         Storage.saveSettings({ videoDefaults });
         this.flashSaved();
     },
@@ -540,5 +547,26 @@ const SettingsModule = {
         ];
         return sizes.map(s => `<option value="${s.v}" ${s.v===sel?'selected':''}>${s.l}</option>`).join('');
     },
+
+    // 生成视频分辨率选项：value 与乱神版V3 时间轴节点 resolution 字段一致（"宽 x 高 (比例)"），
+    // 右侧标注横屏/竖屏/方屏。旧导演台无此字段，后端会从 value 解析出宽高写入 custom_width/height。
+    videoResOpts(sel) {
+        const list = [
+            '480 x 832 (9:16)', '544 x 960 (9:16)', '576 x 1024 (9:16)', '720 x 1280 (9:16)',
+            '768 x 1024 (3:4)', '816 x 1456 (9:16)', '817 x 1920 (1:2.35)', '864 x 1536 (9:16)',
+            '1080 x 1920 (9:16)',
+            '1920 x 1080 (16:9)', '1920 x 817 (2.35:1)', '1536 x 864 (16:9)', '1456 x 816 (16:9)',
+            '1280 x 720 (16:9)', '1024 x 768 (4:3)', '1024 x 576 (16:9)', '960 x 544 (16:9)',
+            '832 x 480 (16:9)',
+        ];
+        const orient = (v) => {
+            const m = v.match(/^(\d+)\s*x\s*(\d+)/);
+            if (!m) return '';
+            const w = +m[1], h = +m[2];
+            return w > h ? '横屏' : (w < h ? '竖屏' : '方屏');
+        };
+        return list.map(v => `<option value="${v}" ${v===sel?'selected':''}>${v} · ${orient(v)}</option>`).join('');
+    },
+
     esc(t) { const d = document.createElement('div'); d.textContent = t == null ? '' : t; return d.innerHTML; }
 };
