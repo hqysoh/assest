@@ -1436,3 +1436,16 @@ border:1px solid var(--bd);border-radius:9px;padding:0.55rem 0.7rem;background:v
     display:flex;align-items:center;gap:0.4rem}
 .sb-hist-sub::before{content:'';flex:1;height:1px;background:var(--bd)}
 .sb-hist-sub::after{content:'';flex:1;height:1px;background:var(--bd)}
+
+/* 四宫格 local 提示词标题行：标签 + ✨优化/↩恢复 按钮 */
+.sb-local-prompt-head{display:flex;align-items:center;justify-content:space-between;gap:0.4rem;margin-bottom:0.25rem}
+.sb-local-prompt-label{font-size:0.66rem;font-weight:700;color:var(--t3);letter-spacing:.3px}
+.sb-local-prompt-head .sb-prompt-actions{display:flex;gap:0.3rem;flex-shrink:0}
+.sb-local-prompt-head .btn-tiny{padding:0.1rem 0.4rem;font-size:0.62rem}
+
+/* 四宫格面板缩略图操作区：替换 + 扩展，纵向排列 */
+.sb-local-thumb-acts{display:flex;flex-direction:column;gap:0.25rem;margin-top:0.3rem}
+.sb-local-thumb-acts .btn-tiny{padding:0.1rem 0.35rem;font-size:0.6rem;white-space:nowrap}
+/* 面板已扩展子四宫格的角标 */
+.sb-local-quad-badge{position:absolute;right:2px;top:2px;left:auto;bottom:auto;
+    background:var(--ac,#7c82ff);color:#fff;font-size:0.56rem;font-weight:800;padding:0.04rem 0.28rem;border-radius:7px}

@@ -855,6 +855,190 @@ const StoryboardModule = {
         App.showToast('已恢复原提示语', 'success');
     },
 
+    // ===== 用大模型优化「四宫格组某个面板」的 local 提示语（结合剧本，仅替换文本，可恢复） =====
+    async optimizePanelPrompt(gid, i) {
+        i = parseInt(i, 10) || 0;
+        const p = Storage.getProject(this.projectId);
+        const g = (p.storyboardGroups || []).find(x => x.id === gid);
+        if (!g) return;
+        if (!Array.isArray(g.localPrompts)) g.localPrompts = ['', '', '', ''];
+        const cur = (g.localPrompts[i] || '').trim();
+        if (!cur) { App.showToast('请先填写该面板的 local 提示词再优化', 'info'); return; }
+        const llm = SettingsModule.getLlmConfig();
+        if (!llm.key) { App.showToast('请先在设置页填写文本大模型 API Key', 'error'); return; }
+
+        const btn = document.getElementById('optBtn_' + gid + '_' + i);
+        if (btn) { btn.disabled = true; btn.textContent = '⏳ 优化中'; }
+        try {
+            const r = await API.post('/api/llm/optimize_prompt', {
+                mode: 'optimize',
+                prompt: cur,
+                script: p.script || '',
+                system_prompt: llm.optimizePrompt,
+                api_url: llm.url, api_key: llm.key, model: llm.model,
+            });
+            if (!r.success || !r.text) throw new Error(r.error || '优化失败');
+            if (!Array.isArray(g.localBackup)) g.localBackup = [null, null, null, null];
+            if (g.localBackup[i] == null) g.localBackup[i] = cur;   // 仅首次优化时备份
+            g.localPrompts[i] = r.text;
+            Storage.updateProject(this.projectId, { storyboardGroups: p.storyboardGroups });
+            this.render(this.projectId);
+            App.showToast(`已优化面板${i + 1}的 local 提示语，可点「↩ 恢复」还原`, 'success');
+        } catch (e) {
+            App.showToast('优化失败：' + (e.message || e), 'error');
+            if (btn) { btn.disabled = false; btn.textContent = '✨ 优化'; }
+        }
+    },
+
+    // 恢复四宫格组某面板优化前的 local 提示语
+    restorePanelPrompt(gid, i) {
+        i = parseInt(i, 10) || 0;
+        const p = Storage.getProject(this.projectId);
+        const g = (p.storyboardGroups || []).find(x => x.id === gid);
+        if (!g || !Array.isArray(g.localBackup) || g.localBackup[i] == null) return;
+        if (!Array.isArray(g.localPrompts)) g.localPrompts = ['', '', '', ''];
+        g.localPrompts[i] = g.localBackup[i];
+        g.localBackup[i] = null;
+        Storage.updateProject(this.projectId, { storyboardGroups: p.storyboardGroups });
+        this.render(this.projectId);
+        App.showToast(`已恢复面板${i + 1}的原 local 提示语`, 'success');
+    },
+
+    // ===== 四宫格组「单个面板」扩展四宫格：把该面板这一格扩成 4 格连续剧情并生成四宫格、切分 =====
+    // 结果存在 g.panelQuads[i] = { fourGridImageId, panelImages:[4], lines:[4] }，缩略图显示 🔢4 徽章，点击可看 4 格。
+    async expandPanelToQuad(gid, i) {
+        i = parseInt(i, 10) || 0;
+        const p = Storage.getProject(this.projectId);
+        const g = (p.storyboardGroups || []).find(x => x.id === gid);
+        if (!g) return;
+        const cur = ((g.localPrompts || [])[i] || g.globalPrompt || '').trim();
+        if (!cur) { App.showToast('请先填写该面板的 local 提示词再扩展', 'info'); return; }
+        const llm = SettingsModule.getLlmConfig();
+        if (!llm.key) { App.showToast('请先在设置页填写文本大模型 API Key', 'error'); return; }
+
+        const s = Storage.getSettings();
+        const apiGroups = s.imageApiGroups || [];
+        const defs = s.imageDefaults || {};
+        const activeGroup = apiGroups.find(gr => gr.id === (defs.activeGroupId || (apiGroups[0] && apiGroups[0].id))) || apiGroups[0];
+        if (!activeGroup) { App.showToast('请先在设置中配置图像 API 分组', 'error'); return; }
+
+        const pollKey = 'pq_' + gid + '_' + i;
+        const btn = document.getElementById('pqBtn_' + gid + '_' + i);
+        if (btn) { btn.disabled = true; btn.textContent = '⏳ 改写中'; }
+        this._polls[pollKey] = 'pending';
+        try {
+            // 1) 大模型把该面板改写成 4 句连续剧情
+            const r = await API.post('/api/llm/optimize_prompt', {
+                mode: 'expand', prompt: cur, script: p.script || '',
+                system_prompt: llm.expandPrompt,
+                api_url: llm.url, api_key: llm.key, model: llm.model,
+            });
+            if (!r.success) throw new Error(r.error || '改写失败');
+            const lines = (r.lines && r.lines.length ? r.lines : (r.text || '').split('\n'))
+                .map(x => (x || '').trim()).filter(Boolean).slice(0, 4);
+            while (lines.length < 4) lines.push(cur);
+
+            const quadPrompt = '请生成一张 2×2 四宫格连续分镜图（顺序：左上→右上→左下→右下），四格剧情连续、'
+                + '人物外形服装画风光线保持一致、格间动作平滑过渡，避免任何字幕文字。四格内容分别为：\n'
+                + lines.map((t, k) => `第${k + 1}格：${t}`).join('\n');
+
+            // 2) 参考图：本面板当前图（首选）+ 本组四宫格大图；至少一张
+            const refB64 = [];
+            const panelMid = (g.panelImages || [])[i];
+            const panelImg = panelMid != null ? Storage.getMediaById(this.projectId, panelMid) : null;
+            if (panelImg) { const b = await this._urlToB64(Storage.mediaUrl(panelImg.data)); if (b) refB64.push(b); }
+            if (!refB64.length && g.fourGridImageId != null) {
+                const fg = Storage.getMediaById(this.projectId, g.fourGridImageId);
+                if (fg) { const b = await this._urlToB64(Storage.mediaUrl(fg.data)); if (b) refB64.push(b); }
+            }
+            if (!refB64.length) {
+                const ok = await App.confirm({ title: '⚠️ 没有参考图', message: '该面板与本组四宫格都没有可用图，编辑接口至少需要一张参考图。\n是否仍要尝试生成？', okText: '仍要生成', cancelText: '取消' });
+                if (!ok) { delete this._polls[pollKey]; if (btn) { btn.disabled = false; btn.textContent = '🔢 扩展'; } return; }
+            }
+
+            // 3) 提交生图
+            const submit = await API.post('/api/storyboard/fourgrid', {
+                prompt: quadPrompt, ref_images: refB64,
+                api_url: activeGroup.url, api_key: activeGroup.apiKey,
+                model: (activeGroup.models && activeGroup.models.find(m => /image/i.test(m))) || 'gpt-image-2',
+                size: defs.size || 'auto', quality: defs.quality || 'auto',
+            });
+            if (!submit.success || !submit.task_id) throw new Error(submit.error || '提交失败');
+            this._polls[pollKey] = submit.task_id;
+            if (!Array.isArray(g.panelQuadLines)) g.panelQuadLines = [null, null, null, null];
+            g.panelQuadLines[i] = lines;
+            Storage.updateProject(this.projectId, { storyboardGroups: p.storyboardGroups });
+            this.render(this.projectId);
+            App.showToast(`面板${i + 1} 已改写为 4 格，正在生成四宫格…`, 'info');
+            this._pollPanelQuad(gid, i, submit.task_id, lines);
+        } catch (e) {
+            delete this._polls[pollKey];
+            if (btn) { btn.disabled = false; btn.textContent = '🔢 扩展'; }
+            App.showToast('扩展失败：' + (e.message || e), 'error');
+            this.render(this.projectId);
+        }
+    },
+
+    async _pollPanelQuad(gid, i, taskId, lines) {
+        const pollKey = 'pq_' + gid + '_' + i;
+        try {
+            const result = await this._pollTask(taskId, null);
+            delete this._polls[pollKey];
+            const pp = Storage.getProject(this.projectId);
+            const gg = (pp.storyboardGroups || []).find(x => x.id === gid);
+            if (!gg) return;
+            if (result && result.images && result.images[0]) {
+                const dataUrl = 'data:image/png;base64,' + result.images[0];
+                const dims = await CharacterModule.computeDims(dataUrl);
+                const entry = await Storage._addMedia(this.projectId, 'image', 'storyboards', gid + '_pq' + i, dataUrl, null, dims);
+                // 切分成 4 张子面板
+                const sub = { id: gid + '_pq' + i };
+                try { await this._splitFourGrid(sub, dataUrl); } catch (e) { /* ignore */ }
+                if (!Array.isArray(gg.panelQuads)) gg.panelQuads = [null, null, null, null];
+                gg.panelQuads[i] = { fourGridImageId: entry.id, panelImages: sub.panelImages || [], lines: lines || [] };
+                App.showToast(`✅ 面板${i + 1} 扩展四宫格已生成`, 'success');
+            } else {
+                App.showToast(`面板${i + 1} 扩展四宫格生成失败`, 'error');
+            }
+            Storage.updateProject(this.projectId, { storyboardGroups: pp.storyboardGroups });
+            this.render(this.projectId);
+        } catch (e) {
+            delete this._polls[pollKey];
+            App.showToast(`面板${i + 1} 扩展四宫格失败：` + (e.message || e), 'error');
+            this.render(this.projectId);
+        }
+    },
+
+    // 查看某面板的扩展四宫格 4 格（左右切换）
+    openPanelQuadZoom(gid, i, idx) {
+        i = parseInt(i, 10) || 0;
+        const p = Storage.getProject(this.projectId);
+        const g = (p.storyboardGroups || []).find(x => x.id === gid);
+        const pq = g && g.panelQuads && g.panelQuads[i];
+        if (!pq) return;
+        idx = ((parseInt(idx, 10) || 0) % 4 + 4) % 4;
+        const urls = (pq.panelImages || []).map(mid => {
+            const m = mid != null ? Storage.getMediaById(this.projectId, mid) : null;
+            return m ? Storage.mediaUrl(m.data) : '';
+        });
+        const cur = urls[idx] || '';
+        const dots = [0, 1, 2, 3].map(k =>
+            `<span class="sb-quad-dot ${k === idx ? 'on' : ''}" onclick="StoryboardModule.openPanelQuadZoom('${gid}',${i},${k})"></span>`).join('');
+        const mc = document.getElementById('modalContent');
+        mc.innerHTML = `
+        <div class="modal-header"><h2 class="modal-title">🔢 面板${i + 1} 扩展四宫格 · 第 ${idx + 1} / 4 格</h2><button class="modal-close" onclick="App.closeModal()">×</button></div>
+        <div class="modal-body">
+            <div class="sb-quad-viewer">
+                <button class="sb-quad-nav prev" title="上一格" onclick="StoryboardModule.openPanelQuadZoom('${gid}',${i},${idx + 3})">‹</button>
+                <div class="sb-quad-viewer-img">${cur ? `<img src="${cur}" alt="第${idx + 1}格">` : '<div class="sb-thumb-placeholder">该格暂无图</div>'}</div>
+                <button class="sb-quad-nav next" title="下一格" onclick="StoryboardModule.openPanelQuadZoom('${gid}',${i},${idx + 1})">›</button>
+            </div>
+            <div class="sb-quad-dots">${dots}</div>
+            ${(pq.lines && pq.lines[idx]) ? `<p class="form-hint" style="margin-top:0.6rem;text-align:center">${this.esc(pq.lines[idx])}</p>` : ''}
+        </div>`;
+        document.getElementById('modalOverlay').classList.add('active');
+    },
+
     // ============================================================
     // 扩展四宫格：把单条分镜改写成 4 格连续剧情，并以前后分镜衔接生成四宫格
     // 复用 /api/storyboard/fourgrid（edit 接口 + 多参考图）与 _splitFourGrid 切分
@@ -1319,13 +1503,24 @@ emotions: this._collectEmotions(),
                 <button class="sb-mark-btn ${marked ? 'on' : ''}" title="${marked ? '已标记，点击取消' : '标记为已处理（置灰）'}" onclick="StoryboardModule.togglePanelMarked('${g.id}',${i})">${marked ? '✅' : '◻'}</button>
             </div>
             <div class="sb-local-thumb-cell">
-                <div class="sb-local-thumb" onclick="${pUrl ? `CharacterModule.openImageZoom('${pUrl}','${zoomTitle}','')` : ''}">
+                <div class="sb-local-thumb" onclick="${(g.panelQuads && g.panelQuads[i]) ? `StoryboardModule.openPanelQuadZoom('${g.id}',${i},0)` : (pUrl ? `CharacterModule.openImageZoom('${pUrl}','${zoomTitle}','')` : '')}">
                     ${pUrl ? `<img src="${pUrl}" alt="面板${i + 1}">` : `<span class="sb-local-no">${i + 1}</span>`}
                     <span class="sb-local-badge">${i + 1}</span>
+                    ${(g.panelQuads && g.panelQuads[i]) ? '<span class="sb-quad-badge sb-local-quad-badge">🔢4</span>' : ''}
                 </div>
-                <button class="btn-ghost btn-tiny sb-local-replace" title="从以往生成的任意图像中选一张替换本面板的画面" onclick="event.stopPropagation();StoryboardModule.replacePanelImage('${g.id}',${i})">🔄 替换</button>
+                <div class="sb-local-thumb-acts">
+                    <button class="btn-ghost btn-tiny sb-local-replace" title="从以往生成的任意图像中选一张替换本面板的画面" onclick="event.stopPropagation();StoryboardModule.replacePanelImage('${g.id}',${i})">🔄 替换</button>
+                    <button class="btn-ghost btn-tiny ${this._polls['pq_' + g.id + '_' + i] ? 'btn-disabled' : ''}" id="pqBtn_${g.id}_${i}" title="把这个面板用大模型扩成4格连续剧情并生成四宫格" onclick="event.stopPropagation();StoryboardModule.expandPanelToQuad('${g.id}',${i})">${this._polls['pq_' + g.id + '_' + i] ? '⏳ 扩展中' : '🔢 扩展'}</button>
+                </div>
             </div>
             <div class="sb-local-main">
+                <div class="sb-local-prompt-head">
+                    <span class="sb-local-prompt-label">local 提示词</span>
+                    <span class="sb-prompt-actions">
+                        <button class="btn-ghost btn-tiny" id="optBtn_${g.id}_${i}" title="用大模型结合剧本优化这条 local 提示语" onclick="StoryboardModule.optimizePanelPrompt('${g.id}',${i})">✨ 优化</button>
+                        ${(g.localBackup && g.localBackup[i] != null) ? `<button class="btn-ghost btn-tiny" title="恢复优化前的 local 提示语" onclick="StoryboardModule.restorePanelPrompt('${g.id}',${i})">↩ 恢复</button>` : ''}
+                    </span>
+                </div>
                 ${InlineEdit.field(local, {
                     placeholder: '点击填写 local 提示词…',
                     className: 'sb-local-prompt clamp-1',

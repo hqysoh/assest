@@ -63,22 +63,7 @@ const SettingsModule = {
             </div>
         </div>
 
-        <div class="settings-section">
-            <h2 class="settings-section-title">🧠 Claude / LLM 接口</h2>
-            <div class="form-row">
-                <div class="form-col">
-                    <label class="form-label">API 地址</label>
-                    <input class="form-input" id="llmApiUrl" value="${this.esc(s.llmApiUrl)}" placeholder="https://api.anthropic.com 或留空使用本地 Claude Code"
-                        onchange="SettingsModule.autoSave('llmApiUrl', this.value)">
-                </div>
-                <div class="form-col">
-                    <label class="form-label">API Key</label>
-                    <input class="form-input" id="llmApiKey" type="password" value="${this.esc(s.llmApiKey)}" placeholder="sk-ant-..."
-                        onchange="SettingsModule.autoSave('llmApiKey', this.value)">
-                </div>
-            </div>
-            <p class="form-hint">用于剧本提取（人物 / 道具 / 场景）。留空则使用后端默认的本地 Claude Code。</p>
-        </div>
+        ${this.renderLlmSection(s)}
 
         <div class="settings-section">
             <h2 class="settings-section-title">🖼️ 图像生成 API 分组</h2>
@@ -157,8 +142,6 @@ const SettingsModule = {
             </div>
             <p class="form-hint">进入「合成视频」时间轴时作为初始值：合成工作流 <code>director</code>(旧导演台) / <code>singularity</code>(乱神版V3)；Epsilon 越小越接近硬切（0.001），越大转场越柔和（1.0）；分辨率右侧标注横/竖屏与画面比例（乱神版V3 写入时间轴 resolution，旧导演台换算为 custom_width/height）。进入时间轴后仍可临时调整，点「生成视频」时会再次确认工作流。</p>
         </div>
-
-        ${this.renderLlmSection(s)}
 
         <div class="settings-section">
             <div class="section-title-row">
