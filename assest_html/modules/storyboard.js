@@ -229,15 +229,29 @@ const StoryboardModule = {
         const selected = g.selected !== false;  // 默认选中
         const marked = !!g.marked;
 
+        const expanded = !!g.expanded;
+        const expGenning = !!this._polls['si_exp_' + g.id];
+        // 扩展四宫格的 4 张面板 url（堆叠展示用）
+        const panelUrls = expanded ? (g.panelImages || []).map(mid => {
+            const m = mid != null ? Storage.getMediaById(this.projectId, mid) : null;
+            return m ? Storage.mediaUrl(m.data) : '';
+        }) : [];
+        const imgArea = expanded
+            ? this._renderStackedQuad(g, panelUrls, expGenning)
+            : `<div class="list-row-img" onclick="${imgUrl ? `CharacterModule.openImageZoom('${imgUrl}','单分镜','')` : ''}">
+                    ${imgUrl ? `<img src="${imgUrl}" alt="单分镜">` : `<div class="sb-thumb-placeholder ${imgErr ? 'sb-thumb-error' : ''}">${placeholder}</div>`}
+                </div>`;
         return `<div class="list-row sb-single-row ${marked ? 'sb-marked' : (selected ? 'sb-picked' : '')}" id="sbRow_${g.id}">
             <div class="list-row-img-section">
-                <div class="list-row-img" onclick="${imgUrl ? `CharacterModule.openImageZoom('${imgUrl}','单分镜','')` : ''}">
-                    ${imgUrl ? `<img src="${imgUrl}" alt="单分镜">` : `<div class="sb-thumb-placeholder ${imgErr ? 'sb-thumb-error' : ''}">${placeholder}</div>`}
-                </div>
+                ${imgArea}
                 <div class="list-img-btns">
                     <button class="btn-ghost btn-tiny ${imgGenning ? 'btn-disabled' : ''}" id="siImgBtn_${g.id}" ${imgGenning ? 'disabled' : ''}
                         onclick="${imgGenning ? '' : `StoryboardModule.genSingleImage('${g.id}')`}">${imgGenning ? '⏳ 生成中' : '🎨 生成'}</button>
                     <button class="btn-ghost btn-tiny" onclick="StoryboardModule.uploadSingleImage('${g.id}')">📁 上传</button>
+                    <button class="btn-ghost btn-tiny ${expGenning ? 'btn-disabled' : ''}" id="siExpBtn_${g.id}" ${expGenning ? 'disabled' : ''}
+                        title="用大模型把这条分镜改写成4格连续剧情，并以前后分镜衔接生成四宫格"
+                        onclick="${expGenning ? '' : `StoryboardModule.expandSingleToQuad('${g.id}')`}">${expGenning ? '⏳ 扩展中' : (expanded ? '🔄 重扩展' : '🔢 扩展四宫格')}</button>
+                    ${expanded ? `<button class="btn-ghost btn-tiny btn-ghost-danger" title="取消扩展，恢复为单图" onclick="StoryboardModule.collapseSingleQuad('${g.id}')">↩ 收回</button>` : ''}
                     ${imgHistCount > 0 ? `<button class="btn-ghost btn-tiny" title="查看本单分镜的历次生成图像并切换" onclick="StoryboardModule.showSingleImageHistory('${g.id}')">📜 历史(${imgHistCount})</button>` : ''}
                 </div>
                 ${imgErr && !imgGenning ? this._singleImgErrorTag(g.id, imgErr) : ''}
@@ -383,13 +397,61 @@ const StoryboardModule = {
                 group: grp.label, name: nameOf(grp.key, m.ownerId) || grp.label,
             }));
         });
-        // 四宫格切分图 / 改分镜前生成的四宫格图（ownerType=storyboards）
+        // 四宫格成品图 / 切分 panel 图 / 单分镜图（ownerType=storyboards）
+        // ownerId 形如：<gid>_quad（四宫格成品）/ <gid>_panelN（切分第N格）/ <gid>_single（单图）/ <gid>
+        const sbGroups = p.storyboardGroups || [];
+        const gidIndex = (gid) => sbGroups.findIndex(x => String(x.id) === String(gid));
         const sbImgs = lib.filter(m => m.type === 'image' && m.ownerType === 'storyboards');
-        sbImgs.forEach(m => out.push({
-            id: m.id, url: Storage.mediaUrl(m.data),
-            group: '🎞️ 四宫格/切分', name: '分镜图 #' + m.id,
-        }));
+        sbImgs.forEach(m => {
+            const owner = String(m.ownerId || '');
+            let gid = owner, kind = 'other', panelIdx = -1;
+            let mm;
+            if ((mm = owner.match(/^(.+)_panel(\d+)$/))) { gid = mm[1]; kind = 'panel'; panelIdx = parseInt(mm[2], 10); }
+            else if ((mm = owner.match(/^(.+)_quad$/))) { gid = mm[1]; kind = 'quad'; }
+            else if ((mm = owner.match(/^(.+)_single$/))) { gid = mm[1]; kind = 'single'; }
+            const gi = gidIndex(gid);
+            const sbNo = gi >= 0 ? gi + 1 : null;
+            const kindLabel = kind === 'quad' ? '四宫格' : (kind === 'panel' ? `切分第${panelIdx + 1}格` : (kind === 'single' ? '单图' : '分镜图'));
+            out.push({
+                id: m.id, url: Storage.mediaUrl(m.data),
+                group: '🎞️ 四宫格/切分', name: (sbNo ? `分镜${sbNo}·` : '') + kindLabel + ' #' + m.id,
+                // 分镜分块用元信息
+                sbGroupId: gid, sbNo, sbKind: kind, panelIdx,
+            });
+        });
         return out;
+    },
+
+    // 把图像资产按「分镜分块」组织：人物/道具/场景照旧按大类；分镜图按所属分镜分块，
+    // 块内「四宫格成品图在前，切分/单图在后」。返回 [{ title, tag, items }]
+    _groupAssetsBySb(all) {
+        const blocks = [];
+        // 1) 非分镜大类（人物/道具/场景）按原 group 各成一块
+        const generalOrder = ['👤 人物', '🎁 道具', '🏞️ 场景'];
+        generalOrder.forEach(label => {
+            const items = all.filter(a => a.group === label);
+            if (items.length) blocks.push({ title: label, tag: '', items });
+        });
+        // 2) 分镜图按 sbNo 分块；块内四宫格在前、切分/单图在后；同类按 panelIdx/id 排序
+        const sbAll = all.filter(a => a.group === '🎞️ 四宫格/切分');
+        const byNo = {};
+        sbAll.forEach(a => { const k = a.sbNo == null ? 'x' : a.sbNo; (byNo[k] = byNo[k] || []).push(a); });
+        Object.keys(byNo)
+            .sort((x, y) => (x === 'x' ? 1e9 : +x) - (y === 'x' ? 1e9 : +y))
+            .forEach(k => {
+                const items = byNo[k].sort((a, b) => {
+                    const rank = t => t === 'quad' ? 0 : (t === 'panel' ? 1 : 2);
+                    if (rank(a.sbKind) !== rank(b.sbKind)) return rank(a.sbKind) - rank(b.sbKind);
+                    if (a.sbKind === 'panel' && b.sbKind === 'panel') return a.panelIdx - b.panelIdx;
+                    return a.id - b.id;
+                });
+                blocks.push({
+                    title: k === 'x' ? '🎞️ 其它分镜图' : `🎬 分镜${k}`,
+                    tag: k === 'x' ? '' : '四宫格在前 · 切分在后',
+                    items,
+                });
+            });
+        return blocks;
     },
 
     // ===== 选择参考图弹窗（多选，含全部前期图像）=====
@@ -401,14 +463,13 @@ const StoryboardModule = {
         const chosen = new Set((g.refImageIds || []).map(String));
         if (!all.length) { App.showToast('暂无可选图像，请先在人物/道具/场景页生成图，或生成四宫格', 'info'); return; }
 
-        // 按 group 分组展示
-        const byGroup = {};
-        all.forEach(a => { (byGroup[a.group] = byGroup[a.group] || []).push(a); });
-        const sections = Object.keys(byGroup).map(grp => `
-            <div class="sb-pick-section">
-                <div class="sb-pick-section-title">${grp}（${byGroup[grp].length}）</div>
+        // 按「分镜分块」展示：人物/道具/场景各成一块；分镜图按所属分镜分块（四宫格在前、切分在后），块间分割线
+        const blocks = this._groupAssetsBySb(all);
+        const sections = blocks.map(blk => `
+            <div class="sb-pick-section sb-hist-block">
+                <div class="sb-hist-block-title">${blk.title}（${blk.items.length}）${blk.tag ? `<span class="sb-hist-block-tag">${blk.tag}</span>` : ''}</div>
                 <div class="sb-pick-grid">
-                    ${byGroup[grp].map(a => `
+                    ${blk.items.map(a => `
                         <label class="sb-pick-cell ${chosen.has(String(a.id)) ? 'selected' : ''}" data-id="${a.id}">
                             <input type="checkbox" value="${a.id}" ${chosen.has(String(a.id)) ? 'checked' : ''} onchange="this.closest('.sb-pick-cell').classList.toggle('selected', this.checked)">
                             <img src="${a.url}" loading="lazy">
@@ -455,13 +516,12 @@ const StoryboardModule = {
         const cur = (g.panelImages || [])[i];
         const curStr = cur != null ? String(cur) : '';
 
-        const byGroup = {};
-        all.forEach(a => { (byGroup[a.group] = byGroup[a.group] || []).push(a); });
-        const sections = Object.keys(byGroup).map(grp => `
-            <div class="sb-pick-section">
-                <div class="sb-pick-section-title">${grp}（${byGroup[grp].length}）</div>
+        const blocks = this._groupAssetsBySb(all);
+        const sections = blocks.map(blk => `
+            <div class="sb-pick-section sb-hist-block">
+                <div class="sb-hist-block-title">${blk.title}（${blk.items.length}）${blk.tag ? `<span class="sb-hist-block-tag">${blk.tag}</span>` : ''}</div>
                 <div class="sb-pick-grid">
-                    ${byGroup[grp].map(a => `
+                    ${blk.items.map(a => `
                         <div class="sb-pick-cell ${curStr === String(a.id) ? 'selected' : ''}" data-id="${a.id}" onclick="StoryboardModule._doReplacePanelImage('${gid}',${i},${a.id})">
                             <img src="${a.url}" loading="lazy">
                             <span class="sb-pick-name">${this.esc(a.name)}</span>
@@ -793,6 +853,284 @@ const StoryboardModule = {
         Storage.updateProject(this.projectId, { storyboardGroups: p.storyboardGroups });
         this.render(this.projectId);
         App.showToast('已恢复原提示语', 'success');
+    },
+
+    // ============================================================
+    // 扩展四宫格：把单条分镜改写成 4 格连续剧情，并以前后分镜衔接生成四宫格
+    // 复用 /api/storyboard/fourgrid（edit 接口 + 多参考图）与 _splitFourGrid 切分
+    // ============================================================
+
+    // 渲染「堆叠四宫格」：四张面板叠成一摞卡片 + 张数徽章，点击展开大图左右切换
+    _renderStackedQuad(g, panelUrls, genning) {
+        const have = (panelUrls || []).filter(Boolean).length;
+        if (genning && !have) {
+            return `<div class="list-row-img sb-quad-stack sb-quad-loading"><div class="sb-spinner"></div></div>`;
+        }
+        if (!have) {
+            return `<div class="list-row-img sb-quad-stack"><div class="sb-thumb-placeholder">🔢<br>待扩展</div></div>`;
+        }
+        const top = panelUrls.find(Boolean) || '';
+        // 叠放卡片：底层两张作出“一摞”的视觉，顶层为第 1 格
+        return `<div class="list-row-img sb-quad-stack" title="点击查看 4 格大图（可左右切换）" onclick="StoryboardModule.openQuadZoom('${g.id}',0)">
+            <div class="sb-quad-card sb-quad-card-3"></div>
+            <div class="sb-quad-card sb-quad-card-2"></div>
+            <div class="sb-quad-card sb-quad-card-1"><img src="${top}" alt="四宫格第1格"></div>
+            <span class="sb-quad-badge">🔢 ${have}/4</span>
+        </div>`;
+    },
+
+    // 打开扩展四宫格大图查看器：左右切换 4 格，可从历史替换当前格
+    openQuadZoom(gid, idx) {
+        const p = Storage.getProject(this.projectId);
+        const g = (p.storyboardGroups || []).find(x => x.id === gid);
+        if (!g || !g.expanded) return;
+        idx = ((parseInt(idx, 10) || 0) % 4 + 4) % 4;
+        const urls = (g.panelImages || []).map(mid => {
+            const m = mid != null ? Storage.getMediaById(this.projectId, mid) : null;
+            return m ? Storage.mediaUrl(m.data) : '';
+        });
+        const cur = urls[idx] || '';
+        const dots = [0, 1, 2, 3].map(i =>
+            `<span class="sb-quad-dot ${i === idx ? 'on' : ''}" onclick="StoryboardModule.openQuadZoom('${gid}',${i})"></span>`).join('');
+        const mc = document.getElementById('modalContent');
+        mc.innerHTML = `
+        <div class="modal-header"><h2 class="modal-title">🔢 扩展四宫格 · 第 ${idx + 1} / 4 格</h2><button class="modal-close" onclick="App.closeModal()">×</button></div>
+        <div class="modal-body">
+            <div class="sb-quad-viewer">
+                <button class="sb-quad-nav prev" title="上一格" onclick="StoryboardModule.openQuadZoom('${gid}',${idx + 3})">‹</button>
+                <div class="sb-quad-viewer-img">
+                    ${cur ? `<img src="${cur}" alt="第${idx + 1}格">` : '<div class="sb-thumb-placeholder">该格暂无图</div>'}
+                </div>
+                <button class="sb-quad-nav next" title="下一格" onclick="StoryboardModule.openQuadZoom('${gid}',${idx + 1})">›</button>
+            </div>
+            <div class="sb-quad-dots">${dots}</div>
+            <div class="sb-quad-viewer-actions">
+                <button class="btn-secondary btn-tiny" onclick="StoryboardModule.replacePanelFromHistory('${gid}',${idx})">🖼️ 从历史替换本格</button>
+            </div>
+        </div>`;
+        document.getElementById('modalOverlay').classList.add('active');
+    },
+
+    // 扩展：把单条分镜用大模型改写成 4 句连续剧情，再以前后分镜衔接生成四宫格并切分
+    async expandSingleToQuad(gid) {
+        const p = Storage.getProject(this.projectId);
+        const g = (p.storyboardGroups || []).find(x => x.id === gid);
+        if (!g) return;
+        const cur = (g.prompt || '').trim();
+        if (!cur) { App.showToast('请先填写画面提示词再扩展', 'info'); return; }
+        const llm = SettingsModule.getLlmConfig();
+        if (!llm.key) { App.showToast('请先在设置页填写文本大模型 API Key', 'error'); return; }
+
+        const s = Storage.getSettings();
+        const apiGroups = s.imageApiGroups || [];
+        const defs = s.imageDefaults || {};
+        const activeGroup = apiGroups.find(gr => gr.id === (defs.activeGroupId || (apiGroups[0] && apiGroups[0].id))) || apiGroups[0];
+        if (!activeGroup) { App.showToast('请先在设置中配置图像 API 分组', 'error'); return; }
+
+        const btn = document.getElementById('siExpBtn_' + gid);
+        if (btn) { btn.disabled = true; btn.textContent = '⏳ 改写中'; }
+        this._polls['si_exp_' + gid] = 'pending';
+        try {
+            // 1) 用大模型把这条分镜改写成 4 行连续剧情
+            const r = await API.post('/api/llm/optimize_prompt', {
+                mode: 'expand',
+                prompt: cur,
+                script: p.script || '',
+                system_prompt: llm.expandPrompt,
+                api_url: llm.url, api_key: llm.key, model: llm.model,
+            });
+            if (!r.success) throw new Error(r.error || '改写失败');
+            const lines = (r.lines && r.lines.length ? r.lines : (r.text || '').split('\n'))
+                .map(x => (x || '').trim()).filter(Boolean).slice(0, 4);
+            while (lines.length < 4) lines.push(cur);
+            g.expandLines = lines;
+
+            // 2) 组装四宫格提示词：要求 2×2 连续四格，逐格描述
+            const quadPrompt = '请生成一张 2×2 四宫格连续分镜图（顺序：左上→右上→左下→右下），四格剧情连续、'
+                + '人物外形服装画风光线保持一致、格间动作平滑过渡，避免任何字幕文字。四格内容分别为：\n'
+                + lines.map((t, i) => `第${i + 1}格：${t}`).join('\n');
+
+            // 3) 收集参考图：本分镜参考图 + 前一分镜末图 + 后一分镜首图（用于前后衔接）
+            const refB64 = [];
+            for (const mid of (g.refImageIds || [])) {
+                const m = Storage.getMediaById(this.projectId, mid);
+                if (!m) continue;
+                const b64 = await this._urlToB64(Storage.mediaUrl(m.data));
+                if (b64) refB64.push(b64);
+            }
+            const { prevUrl, nextUrl } = this._neighborEdgeImages(p, gid);
+            for (const u of [prevUrl, nextUrl]) {
+                if (!u) continue;
+                const b64 = await this._urlToB64(u);
+                if (b64) refB64.push(b64);
+            }
+            if (!refB64.length) {
+                const ok = await App.confirm({
+                    title: '⚠️ 没有参考图',
+                    message: '本分镜及前后分镜都没有可用图，编辑接口至少需要一张参考图。\n是否仍要尝试生成？',
+                    okText: '仍要生成', cancelText: '去选图',
+                });
+                if (!ok) { this._clearExpandPoll(gid, btn); return; }
+            }
+
+            // 4) 提交四宫格生图
+            const submit = await API.post('/api/storyboard/fourgrid', {
+                prompt: quadPrompt,
+                ref_images: refB64,
+                api_url: activeGroup.url,
+                api_key: activeGroup.apiKey,
+                model: (activeGroup.models && activeGroup.models.find(m => /image/i.test(m))) || 'gpt-image-2',
+                size: defs.size || 'auto',
+                quality: defs.quality || 'auto',
+            });
+            if (!submit.success || !submit.task_id) throw new Error(submit.error || '提交失败');
+            this._polls['si_exp_' + gid] = submit.task_id;
+            Storage.updateProject(this.projectId, { storyboardGroups: p.storyboardGroups });
+            this.render(this.projectId);
+            App.showToast('已改写为 4 格剧情，正在生成四宫格…', 'info');
+            this._pollExpandQuad(gid, submit.task_id);
+        } catch (e) {
+            this._clearExpandPoll(gid, btn);
+            App.showToast('扩展失败：' + (e.message || e), 'error');
+            this.render(this.projectId);
+        }
+    },
+
+    _clearExpandPoll(gid, btn) {
+        delete this._polls['si_exp_' + gid];
+        if (btn) { btn.disabled = false; btn.textContent = '🔢 扩展四宫格'; }
+    },
+
+    async _pollExpandQuad(gid, taskId) {
+        try {
+            const result = await this._pollTask(taskId, null);
+            delete this._polls['si_exp_' + gid];
+            const pp = Storage.getProject(this.projectId);
+            const gg = (pp.storyboardGroups || []).find(x => x.id === gid);
+            if (!gg) return;
+            if (result && result.images && result.images[0]) {
+                const dataUrl = 'data:image/png;base64,' + result.images[0];
+                const dims = await CharacterModule.computeDims(dataUrl);
+                // 备份单图状态，便于「收回」恢复
+                if (gg.singleBackupImageId === undefined) gg.singleBackupImageId = gg.imageId || null;
+                const entry = await Storage._addMedia(this.projectId, 'image', 'storyboards', gid + '_quad', dataUrl, null, dims);
+                gg.fourGridImageId = entry.id;
+                gg.expanded = true;
+                gg.imageError = '';
+                try { await this._splitFourGrid(gg, dataUrl); }
+                catch (e) { gg.fourGridError = '切分失败：' + (e && e.message ? e.message : e); }
+                App.showToast('✅ 已生成扩展四宫格', 'success');
+            } else {
+                gg.imageError = '未获取到四宫格图像';
+                App.showToast('扩展四宫格生成失败', 'error');
+            }
+            Storage.updateProject(this.projectId, { storyboardGroups: pp.storyboardGroups });
+            this.render(this.projectId);
+        } catch (e) {
+            delete this._polls['si_exp_' + gid];
+            const pp = Storage.getProject(this.projectId);
+            const gg = (pp.storyboardGroups || []).find(x => x.id === gid);
+            if (gg) { gg.imageError = e.message || '生成异常'; Storage.updateProject(this.projectId, { storyboardGroups: pp.storyboardGroups }); }
+            App.showToast('扩展四宫格生成失败：' + (e.message || e), 'error');
+            this.render(this.projectId);
+        }
+    },
+
+    // 收回扩展：恢复为单图模式（保留已生成的面板数据，不删除）
+    collapseSingleQuad(gid) {
+        const p = Storage.getProject(this.projectId);
+        const g = (p.storyboardGroups || []).find(x => x.id === gid);
+        if (!g) return;
+        g.expanded = false;
+        if (g.singleBackupImageId !== undefined) { g.imageId = g.singleBackupImageId; delete g.singleBackupImageId; }
+        Storage.updateProject(this.projectId, { storyboardGroups: p.storyboardGroups });
+        this.render(this.projectId);
+        App.showToast('已收回为单图（扩展数据保留，可重新展开）', 'success');
+    },
+
+    // 取相邻分镜的衔接图：前一分镜的「末图/当前图」、后一分镜的「首图/当前图」
+    _neighborEdgeImages(p, gid) {
+        const groups = p.storyboardGroups || [];
+        const idx = groups.findIndex(x => x.id === gid);
+        const pick = (g) => {
+            if (!g) return '';
+            // 扩展过的分镜取最后一格，否则取当前图
+            if (g.expanded && (g.panelImages || []).length) {
+                const last = [...g.panelImages].reverse().find(Boolean);
+                const m = last != null ? Storage.getMediaById(this.projectId, last) : null;
+                if (m) return Storage.mediaUrl(m.data);
+            }
+            const im = g.imageId != null ? Storage.getMediaById(this.projectId, g.imageId) : null;
+            return im ? Storage.mediaUrl(im.data) : '';
+        };
+        const pickFirst = (g) => {
+            if (!g) return '';
+            if (g.expanded && (g.panelImages || []).length) {
+                const first = (g.panelImages || []).find(Boolean);
+                const m = first != null ? Storage.getMediaById(this.projectId, first) : null;
+                if (m) return Storage.mediaUrl(m.data);
+            }
+            const im = g.imageId != null ? Storage.getMediaById(this.projectId, g.imageId) : null;
+            return im ? Storage.mediaUrl(im.data) : '';
+        };
+        return { prevUrl: pick(groups[idx - 1]), nextUrl: pickFirst(groups[idx + 1]) };
+    },
+
+    // 从历史图像替换扩展四宫格的某一格面板
+    async replacePanelFromHistory(gid, idx) {
+        const p = Storage.getProject(this.projectId);
+        const g = (p.storyboardGroups || []).find(x => x.id === gid);
+        if (!g) return;
+        idx = parseInt(idx, 10) || 0;
+        const all = this._allImageAssets();
+        if (!all.length) { App.showToast('暂无可用的历史图像', 'info'); return; }
+        const blocks = this._groupAssetsBySb(all);
+        const sections = blocks.map(blk => `
+            <div class="sb-hist-block">
+                <div class="sb-hist-block-title">${blk.title}（${blk.items.length}）${blk.tag ? `<span class="sb-hist-block-tag">${blk.tag}</span>` : ''}</div>
+                <div class="image-gallery">
+                    ${blk.items.map(it => `
+                        <div class="gallery-item" onclick="StoryboardModule.doReplacePanel('${gid}',${idx},${it.id})">
+                            <img src="${it.url}" alt="${this.esc(it.name)}">
+                            <div class="gallery-item-name">${this.esc(it.name)}</div>
+                        </div>`).join('')}
+                </div>
+            </div>`).join('');
+        const mc = document.getElementById('modalContent');
+        mc.innerHTML = `
+        <div class="modal-header"><h2 class="modal-title">🖼️ 替换第 ${idx + 1} 格</h2><button class="modal-close" onclick="StoryboardModule.openQuadZoom('${gid}',${idx})">×</button></div>
+        <div class="modal-body sb-pick-body"><div class="gallery-count">点击任意图像替换本格（不改动其它格与原四宫格大图）</div>${sections}</div>`;
+        document.getElementById('modalOverlay').classList.add('active');
+    },
+
+    async doReplacePanel(gid, idx, mediaId) {
+        const p = Storage.getProject(this.projectId);
+        const g = (p.storyboardGroups || []).find(x => x.id === gid);
+        if (!g) return;
+        idx = parseInt(idx, 10) || 0;
+        mediaId = parseInt(mediaId, 10);
+        const src = Storage.getMediaById(this.projectId, mediaId);
+        if (!src) { App.showToast('源图像不存在', 'error'); return; }
+        // 复制一份为本面板专属（ownerType=storyboards），避免与原图共用 mediaId 被联动删除
+        const dataUrl = await this._urlToB64Full(Storage.mediaUrl(src.data));
+        const dims = src.dims || (await CharacterModule.computeDims(dataUrl));
+        const copy = await Storage._addMedia(this.projectId, 'image', 'storyboards', gid + '_panel' + idx, dataUrl, null, dims);
+        if (!Array.isArray(g.panelImages)) g.panelImages = [null, null, null, null];
+        g.panelImages[idx] = copy.id;
+        Storage.updateProject(this.projectId, { storyboardGroups: p.storyboardGroups });
+        App.showToast('已替换第 ' + (idx + 1) + ' 格', 'success');
+        this.openQuadZoom(gid, idx);
+        this.render(this.projectId);
+    },
+
+    // 把 url 转成完整 dataURL（含前缀），用于复制图像
+    async _urlToB64Full(url) {
+        if (url && url.startsWith('data:')) return url;
+        const blob = await (await fetch(url, { cache: 'no-store' })).blob();
+        return await new Promise((res, rej) => {
+            const fr = new FileReader();
+            fr.onload = () => res(fr.result); fr.onerror = rej; fr.readAsDataURL(blob);
+        });
     },
 
     // ===== 单分镜：图像历史画廊（仿人物图像历史，可设为当前 / 删除） =====
@@ -3121,6 +3459,29 @@ emotions: this._collectEmotions(),
         all.forEach((g) => {
             if (g.single) {
                 if (g.selected === false) return;        // 未勾选合成 → 不纳入
+                // 扩展四宫格的单分镜：拆成 4 段连续（占原时长平分），逐格用 panelImages + 改写的 expandLines
+                if (g.expanded && Array.isArray(g.panelImages) && g.panelImages.some(x => x != null)) {
+                    const panels = g.panelImages || [];
+                    if (panels.every(x => x == null)) { skipNoImg++; return; }
+                    if (!firstMeta) firstMeta = g;
+                    for (let i = 0; i < 4; i++) {
+                        const imgId = panels[i];
+                        if (imgId == null) continue;       // 缺某格则跳过该格（其余格仍连续）
+                        segments.push({
+                            uid: Storage._uid(),
+                            groupId: g.id, panel: i, single: true, expanded: true,
+                            imageId: imgId,
+                            // 台词只放第 1 格，避免 4 段重复同一句配音
+                            audioId: i === 0 ? g.audioId : null,
+                            prompt: (g.expandLines || [])[i] || g.prompt || '',
+                            length: 90, trimStart: 0,
+                            transition: g.transition || 'cut',
+                            shotTransition: (g.shotTransitions || [])[i] || '',
+                            dialogue: i === 0 ? (g.dialogue || {}) : {},
+                        });
+                    }
+                    return;
+                }
                 if (g.imageId == null) { skipNoImg++; return; }   // 勾选了但没生成图 → 跳过并计数
                 if (!firstMeta) firstMeta = g;
                 segments.push({

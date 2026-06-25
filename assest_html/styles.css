@@ -1394,3 +1394,45 @@ border:1px solid var(--bd);border-radius:9px;padding:0.55rem 0.7rem;background:v
 /* 拖入该卡片图像区时：整区轻微高亮 + 显示加号层 */
 .list-row-img-section.drop-over .list-row-img{box-shadow:0 0 0 2px var(--ac,#7c82ff)}
 .list-row-img-section.drop-over .drop-add-overlay{display:flex}
+
+/* ============ 扩展四宫格：堆叠卡片缩略图 ============ */
+/* 一摞卡片视觉：底层两张错位偏移，顶层显示第 1 格 */
+.sb-quad-stack{position:relative;overflow:visible}
+.sb-quad-stack .sb-quad-card{position:absolute;inset:0;border-radius:12px;overflow:hidden;
+    border:2px solid var(--bd);background:var(--bg3);box-shadow:0 2px 8px var(--sh)}
+.sb-quad-stack .sb-quad-card-1{z-index:3;transform:rotate(0deg)}
+.sb-quad-stack .sb-quad-card-2{z-index:2;transform:translate(5px,5px) rotate(2.5deg)}
+.sb-quad-stack .sb-quad-card-3{z-index:1;transform:translate(9px,9px) rotate(5deg)}
+.sb-quad-stack .sb-quad-card img{width:100%;height:100%;object-fit:cover}
+.sb-quad-stack:hover .sb-quad-card-1{transform:translate(-2px,-2px)}
+.sb-quad-stack .sb-quad-badge{position:absolute;left:4px;bottom:4px;z-index:5;
+    background:rgba(0,0,0,.66);color:#fff;font-size:0.64rem;font-weight:800;
+    padding:0.1rem 0.4rem;border-radius:8px;letter-spacing:.3px}
+.sb-quad-stack.sb-quad-loading{display:flex;align-items:center;justify-content:center}
+
+/* ============ 扩展四宫格：大图查看器（左右切换 4 格） ============ */
+.sb-quad-viewer{display:flex;align-items:center;gap:0.6rem;justify-content:center}
+.sb-quad-viewer-img{flex:1;max-width:640px;border-radius:14px;overflow:hidden;
+    background:var(--bg3);border:1px solid var(--bd);display:flex;align-items:center;justify-content:center;min-height:240px}
+.sb-quad-viewer-img img{max-width:100%;max-height:70vh;display:block;object-fit:contain}
+.sb-quad-nav{flex-shrink:0;width:44px;height:44px;border-radius:50%;border:1px solid var(--bd);
+    background:var(--bg2);color:var(--t1);font-size:1.6rem;line-height:1;cursor:pointer;
+    display:flex;align-items:center;justify-content:center;transition:all .2s}
+.sb-quad-nav:hover{background:var(--ac);color:#fff;border-color:var(--ac);transform:scale(1.08)}
+.sb-quad-dots{display:flex;gap:0.5rem;justify-content:center;margin-top:0.8rem}
+.sb-quad-dot{width:10px;height:10px;border-radius:50%;background:var(--bd2);cursor:pointer;transition:all .2s}
+.sb-quad-dot.on{background:var(--ac);transform:scale(1.25)}
+.sb-quad-dot:hover{background:var(--ac2)}
+.sb-quad-viewer-actions{display:flex;justify-content:center;gap:0.5rem;margin-top:0.9rem}
+
+/* ============ 历史画廊：按分镜分块 + 分割线 ============ */
+.sb-hist-block{margin-bottom:1.1rem}
+.sb-hist-block+.sb-hist-block{border-top:2px dashed var(--bd);padding-top:1rem}
+.sb-hist-block-title{display:flex;align-items:center;gap:0.45rem;font-size:0.86rem;font-weight:800;
+    color:var(--t1);margin-bottom:0.55rem}
+.sb-hist-block-title .sb-hist-block-tag{font-size:0.64rem;font-weight:700;padding:0.08rem 0.45rem;
+    border-radius:8px;background:var(--grad-soft);color:var(--ac2);border:1px solid var(--bd)}
+.sb-hist-sub{font-size:0.72rem;font-weight:700;color:var(--t2);margin:0.5rem 0 0.4rem;
+    display:flex;align-items:center;gap:0.4rem}
+.sb-hist-sub::before{content:'';flex:1;height:1px;background:var(--bd)}
+.sb-hist-sub::after{content:'';flex:1;height:1px;background:var(--bd)}
