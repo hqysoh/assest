@@ -572,6 +572,63 @@ def _call_image_api(prompt, api_url, api_key, model, size, quality, n=1):
     return None, '未获取到图像数据'
 
 
+# ==================== 文本大模型（LLM）：分镜提示语优化 / 改写 ====================
+# DeepSeek / OpenAI 兼容网关：POST {base}/chat/completions，Bearer 鉴权，标准 messages 格式。
+# 默认 base=https://api.deepseek.com，模型=deepseek-v4-flash（用户可在设置里改）。
+
+# 优化单条 local 提示语的默认系统提示词（可被设置覆盖）。{script} 处会注入剧本作参考。
+DEFAULT_OPTIMIZE_PROMPT = (
+    "你是专业的影视分镜画面提示词优化师。下面给你整部剧本作为背景参考，"
+    "请把用户提供的某条分镜画面提示语优化得更具电影感：补充镜头语言（景别/机位/运镜）、"
+    "光线氛围、人物动作与表情的连续细节，保持原意与人物/场景一致，避免出现字幕文字。"
+    "严格要求：只输出优化后的提示语正文本身，不要任何解释、前后缀、引号或标题。\n\n"
+    "【剧本背景参考】\n{script}"
+)
+
+# 把一条 local 提示语扩写成「4格连续四宫格」各自描述的默认系统提示词（可被设置覆盖）。
+DEFAULT_EXPAND_PROMPT = (
+    "你是专业的影视分镜师。下面给你整部剧本作为背景参考。"
+    "请把用户提供的这一条分镜，拆解成【4个连续镜头】（构成 2×2 四宫格，顺序为左上→右上→左下→右下），"
+    "呈现完整的「前因→发展→高潮→结果」连续剧情，4格之间动作/镜头平滑过渡，保持人物外形服装画风光线一致。"
+    "第1格自然承接上一分镜，第4格为下一分镜铺垫。每格只描述该格画面，避免字幕文字。\n"
+    "严格要求：只输出 4 行，每行一格的画面提示语，不要编号、不要解释、不要空行。\n\n"
+    "【剧本背景参考】\n{script}"
+)
+
+
+def _call_text_llm(messages, api_url, api_key, model, temperature=0.7, timeout=120):
+    """调用 OpenAI/DeepSeek 兼容的文本对话接口，返回 (text, error)。
+    api_url 可填到根域名（自动补 /chat/completions）或完整端点。"""
+    base = (api_url or 'https://api.deepseek.com').rstrip('/')
+    url = base if base.endswith('/chat/completions') else base + '/chat/completions'
+    body = {'model': model or 'deepseek-v4-flash', 'messages': messages,
+            'stream': False, 'temperature': temperature}
+    try:
+        resp = requests.post(url, json=body,
+            headers={'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'},
+            timeout=timeout)
+    except Exception as e:
+        return None, f'请求失败: {e}'
+    if resp.status_code != 200:
+        msg = f'HTTP {resp.status_code}'
+        try:
+            em = (resp.json().get('error') or {})
+            if isinstance(em, dict):
+                msg = em.get('message') or msg
+        except Exception:
+            msg = (resp.text or msg)[:160]
+        return None, msg
+    try:
+        j = resp.json()
+        content = (j.get('choices') or [{}])[0].get('message', {}).get('content', '')
+        content = (content or '').strip()
+        if not content:
+            return None, '模型返回空内容'
+        return content, None
+    except Exception as e:
+        return None, f'解析失败: {e}'
+
+
 def _cleanup_image_jobs():
     now = time.time()
     with image_jobs_lock:
@@ -1857,6 +1914,7 @@ class Handler(BaseHTTPRequestHandler):
             '/api/sb_cancel': self.sb_task_cancel,                      # 打断分镜异步任务（真实中断 ComfyUI）
             '/api/import_video': self.import_video_handler,            # 视频历史：拖放/上传导入，落盘一次后索引绝对路径
             '/api/open_path': self.open_path_handler,                  # 视频历史：在系统文件管理器中定位/打开该文件
+            '/api/llm/optimize_prompt': self.llm_optimize_prompt,      # 同步：调用文本大模型优化/改写分镜提示语
         }
         handler = routes.get(self.path)
         if handler: handler()
@@ -2217,6 +2275,61 @@ class Handler(BaseHTTPRequestHandler):
             }
             task_id = _submit_sb_job('fourgrid', _run_fourgrid_job, params)
             self.send_json({'success': True, 'task_id': task_id, 'status': 'pending'})
+        except Exception as e:
+            import traceback; traceback.print_exc()
+            self.send_json({'success': False, 'error': str(e)}, 500)
+
+    # ---- 文本大模型：优化 / 改写分镜提示语（同步） ----
+
+    def llm_optimize_prompt(self):
+        """用文本大模型优化或改写分镜提示语，模型只返回结果文本。
+        入参：
+          mode: 'optimize'(优化单条 local，默认) | 'expand'(改写成4格四宫格各自描述)
+          prompt: 待优化/改写的原始提示语
+          script: 剧本全文（作为背景参考，可空）
+          system_prompt: 可选，覆盖默认系统提示词（设置页可配置；含 {script} 占位）
+          api_url / api_key / model: LLM 配置（设置页可配置）
+        返回：optimize → {success, text}；expand → {success, text, lines:[4]}"""
+        try:
+            d = self.read_body()
+            mode = (d.get('mode') or 'optimize').strip()
+            prompt = (d.get('prompt') or '').strip()
+            if not prompt:
+                self.send_json({'success': False, 'error': '缺少待优化的提示语'}, 400); return
+            script = (d.get('script') or '').strip()
+            api_url = d.get('api_url') or 'https://api.deepseek.com'
+            api_key = d.get('api_key') or ''
+            model = d.get('model') or 'deepseek-v4-flash'
+            if not api_key:
+                self.send_json({'success': False, 'error': '未配置文本大模型 API Key（请在设置页填写）'}, 400); return
+            # 系统提示词：优先用用户在设置里配置的；否则用默认。{script} 注入剧本（截断防超长）。
+            default_sys = DEFAULT_EXPAND_PROMPT if mode == 'expand' else DEFAULT_OPTIMIZE_PROMPT
+            sys_tmpl = d.get('system_prompt') or default_sys
+            script_for_prompt = script[:6000] if script else '（未提供剧本，仅依据下方提示语优化）'
+            try:
+                system_content = sys_tmpl.replace('{script}', script_for_prompt)
+            except Exception:
+                system_content = sys_tmpl + '\n\n【剧本背景参考】\n' + script_for_prompt
+            messages = [
+                {'role': 'system', 'content': system_content},
+                {'role': 'user', 'content': prompt},
+            ]
+            text, err = _call_text_llm(messages, api_url, api_key, model)
+            if err:
+                self.send_json({'success': False, 'error': f'大模型调用失败: {err}'}, 502); return
+            text = text.strip().strip('"').strip('“”').strip()
+            resp = {'success': True, 'text': text}
+            if mode == 'expand':
+                # 取非空行，最多 4 行，去掉可能的「1. / - / 第1格：」前缀
+                lines = []
+                for ln in text.splitlines():
+                    s = ln.strip()
+                    if not s:
+                        continue
+                    s = re.sub(r'^\s*(第?\s*[1-4一二三四]\s*[格幕、.):：]\s*|[-*•]\s*|\d+[.)、]\s*)', '', s)
+                    lines.append(s.strip())
+                resp['lines'] = (lines + [''] * 4)[:4]
+            self.send_json(resp)
         except Exception as e:
             import traceback; traceback.print_exc()
             self.send_json({'success': False, 'error': str(e)}, 500)

@@ -254,7 +254,13 @@ const StoryboardModule = {
                 </div>
                 <div class="list-row-meta">
                     <div class="meta-section">
-                        <div class="meta-header"><span class="meta-label">画面提示词</span></div>
+                        <div class="meta-header">
+                            <span class="meta-label">画面提示词</span>
+                            <span class="sb-prompt-actions">
+                                <button class="btn-ghost btn-tiny" id="optBtn_${g.id}" title="用大模型结合剧本优化这条提示语" onclick="StoryboardModule.optimizeLocalPrompt('${g.id}')">✨ 优化</button>
+                                ${g.promptBackup != null ? `<button class="btn-ghost btn-tiny" title="恢复优化前的提示语" onclick="StoryboardModule.restoreLocalPrompt('${g.id}')">↩ 恢复</button>` : ''}
+                            </span>
+                        </div>
                         ${InlineEdit.field(g.prompt || '', {
                             placeholder: '点击填写这个分镜的画面提示词…',
                             className: 'meta-content clamp-1',
@@ -742,6 +748,51 @@ const StoryboardModule = {
         App.showToast('已删除', 'success');
         this.showFourGridHistory(gid);
         this.render(this.projectId);
+    },
+
+    // ===== 用大模型优化单分镜的画面提示语（结合剧本作参考，仅替换文本，可一键恢复） =====
+    async optimizeLocalPrompt(gid) {
+        const p = Storage.getProject(this.projectId);
+        const g = (p.storyboardGroups || []).find(x => x.id === gid);
+        if (!g) return;
+        const cur = (g.prompt || '').trim();
+        if (!cur) { App.showToast('请先填写画面提示词再优化', 'info'); return; }
+        const llm = SettingsModule.getLlmConfig();
+        if (!llm.key) { App.showToast('请先在设置页填写文本大模型 API Key', 'error'); return; }
+
+        const btn = document.getElementById('optBtn_' + gid);
+        if (btn) { btn.disabled = true; btn.textContent = '⏳ 优化中'; }
+        try {
+            const r = await API.post('/api/llm/optimize_prompt', {
+                mode: 'optimize',
+                prompt: cur,
+                script: p.script || '',
+                system_prompt: llm.optimizePrompt,
+                api_url: llm.url, api_key: llm.key, model: llm.model,
+            });
+            if (!r.success || !r.text) throw new Error(r.error || '优化失败');
+            // 备份原值（仅首次优化时备份，便于恢复到最初的原稿）
+            if (g.promptBackup == null) g.promptBackup = cur;
+            g.prompt = r.text;
+            Storage.updateProject(this.projectId, { storyboardGroups: p.storyboardGroups });
+            this.render(this.projectId);
+            App.showToast('已用大模型优化提示语，可点「↩ 恢复」还原', 'success');
+        } catch (e) {
+            App.showToast('优化失败：' + (e.message || e), 'error');
+            if (btn) { btn.disabled = false; btn.textContent = '✨ 优化'; }
+        }
+    },
+
+    // 恢复优化前的原始提示语
+    restoreLocalPrompt(gid) {
+        const p = Storage.getProject(this.projectId);
+        const g = (p.storyboardGroups || []).find(x => x.id === gid);
+        if (!g || g.promptBackup == null) return;
+        g.prompt = g.promptBackup;
+        delete g.promptBackup;
+        Storage.updateProject(this.projectId, { storyboardGroups: p.storyboardGroups });
+        this.render(this.projectId);
+        App.showToast('已恢复原提示语', 'success');
     },
 
     // ===== 单分镜：图像历史画廊（仿人物图像历史，可设为当前 / 删除） =====

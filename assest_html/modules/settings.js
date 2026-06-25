@@ -158,6 +158,8 @@ const SettingsModule = {
             <p class="form-hint">进入「合成视频」时间轴时作为初始值：合成工作流 <code>director</code>(旧导演台) / <code>singularity</code>(乱神版V3)；Epsilon 越小越接近硬切（0.001），越大转场越柔和（1.0）；分辨率右侧标注横/竖屏与画面比例（乱神版V3 写入时间轴 resolution，旧导演台换算为 custom_width/height）。进入时间轴后仍可临时调整，点「生成视频」时会再次确认工作流。</p>
         </div>
 
+        ${this.renderLlmSection(s)}
+
         <div class="settings-section">
             <div class="section-title-row">
                 <h2 class="settings-section-title">📝 全局提示词</h2>
@@ -566,6 +568,96 @@ const SettingsModule = {
             return w > h ? '横屏' : (w < h ? '竖屏' : '方屏');
         };
         return list.map(v => `<option value="${v}" ${v===sel?'selected':''}>${v} · ${orient(v)}</option>`).join('');
+    },
+
+    // ====== 文本大模型（LLM）：优化 / 改写分镜提示语 ======
+    // 默认配置（用户可在设置页修改并即时保存）。key 仅作初始预填，用户可覆盖。
+    LLM_DEFAULTS: {
+        url: 'https://api.deepseek.com',
+        key: 'sk-d13b16db8a9d4f34a54ea301eff74c00',
+        model: 'deepseek-v4-flash',
+        optimizePrompt: '你是专业的影视分镜画面提示词优化师。下面给你整部剧本作为背景参考，请把用户提供的某条分镜画面提示语优化得更具电影感：补充镜头语言（景别/机位/运镜）、光线氛围、人物动作与表情的连续细节，保持原意与人物/场景一致，避免出现字幕文字。严格要求：只输出优化后的提示语正文本身，不要任何解释、前后缀、引号或标题。\n\n【剧本背景参考】\n{script}',
+        expandPrompt: '你是专业的影视分镜师。下面给你整部剧本作为背景参考。请把用户提供的这一条分镜，拆解成【4个连续镜头】（构成 2×2 四宫格，顺序为左上→右上→左下→右下），呈现完整的「前因→发展→高潮→结果」连续剧情，4格之间动作/镜头平滑过渡，保持人物外形服装画风光线一致。第1格自然承接上一分镜，第4格为下一分镜铺垫。每格只描述该格画面，避免字幕文字。\n严格要求：只输出 4 行，每行一格的画面提示语，不要编号、不要解释、不要空行。\n\n【剧本背景参考】\n{script}',
+    },
+
+    // 读取当前 LLM 配置（合并默认值），供前端调用接口时使用
+    getLlmConfig() {
+        const s = Storage.getSettings();
+        const l = s.llmSettings || {};
+        const d = this.LLM_DEFAULTS;
+        return {
+            url: l.url || d.url,
+            key: (l.key !== undefined && l.key !== null) ? l.key : d.key,
+            model: l.model || d.model,
+            optimizePrompt: l.optimizePrompt || d.optimizePrompt,
+            expandPrompt: l.expandPrompt || d.expandPrompt,
+        };
+    },
+
+    renderLlmSection(s) {
+        const l = this.getLlmConfig();
+        return `
+        <div class="settings-section">
+            <h2 class="settings-section-title">🤖 文本大模型（提示语优化 / 四宫格扩展）</h2>
+            <div class="form-row">
+                <div class="form-col" style="flex:2">
+                    <label class="form-label">接口地址（OpenAI / DeepSeek 兼容）</label>
+                    <input class="form-input" id="llmUrl" value="${this.esc(l.url)}" placeholder="https://api.deepseek.com"
+                        onchange="SettingsModule.saveLlm()">
+                </div>
+                <div class="form-col" style="flex:1.5">
+                    <label class="form-label">模型</label>
+                    <input class="form-input" id="llmModel" value="${this.esc(l.model)}" placeholder="deepseek-v4-flash"
+                        onchange="SettingsModule.saveLlm()">
+                </div>
+            </div>
+            <div class="form-group">
+                <label class="form-label">API Key</label>
+                <input class="form-input" id="llmKey" type="password" value="${this.esc(l.key)}" placeholder="sk-..."
+                    onchange="SettingsModule.saveLlm()">
+            </div>
+            <p class="form-hint">用于「✨优化 local 提示语」和「扩展四宫格改写」。地址可填到根域名（自动补 <code>/chat/completions</code>）。优化时会把剧本一并发给模型作参考，模型仅返回优化后的提示语。</p>
+
+            <div class="form-group" style="margin-top:0.8rem">
+                <div class="section-title-row" style="margin-bottom:0.3rem">
+                    <label class="form-label" style="margin:0">优化 local 提示语 · 系统提示词</label>
+                    <button class="btn-ghost btn-tiny" onclick="SettingsModule.resetLlmPrompt('optimizePrompt')" title="恢复默认">✨ 恢复默认</button>
+                </div>
+                <textarea class="form-textarea" id="llmOptimizePrompt" style="min-height:96px"
+                    onchange="SettingsModule.saveLlm()">${this.esc(l.optimizePrompt)}</textarea>
+            </div>
+            <div class="form-group">
+                <div class="section-title-row" style="margin-bottom:0.3rem">
+                    <label class="form-label" style="margin:0">扩展四宫格改写 · 系统提示词</label>
+                    <button class="btn-ghost btn-tiny" onclick="SettingsModule.resetLlmPrompt('expandPrompt')" title="恢复默认">✨ 恢复默认</button>
+                </div>
+                <textarea class="form-textarea" id="llmExpandPrompt" style="min-height:96px"
+                    onchange="SettingsModule.saveLlm()">${this.esc(l.expandPrompt)}</textarea>
+                <p class="form-hint" style="margin-top:0.35rem">两段提示词中的 <code>{script}</code> 会被替换为剧本内容。改写要求模型输出 4 行（每行一格）。</p>
+            </div>
+        </div>`;
+    },
+
+    saveLlm() {
+        const s = Storage.getSettings();
+        const llmSettings = {
+            ...(s.llmSettings || {}),
+            url: ((document.getElementById('llmUrl') || {}).value || '').trim() || this.LLM_DEFAULTS.url,
+            key: ((document.getElementById('llmKey') || {}).value || '').trim(),
+            model: ((document.getElementById('llmModel') || {}).value || '').trim() || this.LLM_DEFAULTS.model,
+            optimizePrompt: ((document.getElementById('llmOptimizePrompt') || {}).value || '').trim() || this.LLM_DEFAULTS.optimizePrompt,
+            expandPrompt: ((document.getElementById('llmExpandPrompt') || {}).value || '').trim() || this.LLM_DEFAULTS.expandPrompt,
+        };
+        Storage.saveSettings({ llmSettings });
+        this.flashSaved();
+    },
+
+    resetLlmPrompt(field) {
+        const s = Storage.getSettings();
+        const llmSettings = { ...(s.llmSettings || {}), [field]: this.LLM_DEFAULTS[field] };
+        Storage.saveSettings({ llmSettings });
+        this.render();
+        App.showToast('已恢复默认提示词', 'success');
     },
 
     esc(t) { const d = document.createElement('div'); d.textContent = t == null ? '' : t; return d.innerHTML; }
