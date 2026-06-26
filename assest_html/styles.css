@@ -1449,3 +1449,8 @@ border:1px solid var(--bd);border-radius:9px;padding:0.55rem 0.7rem;background:v
 /* 面板已扩展子四宫格的角标 */
 .sb-local-quad-badge{position:absolute;right:2px;top:2px;left:auto;bottom:auto;
     background:var(--ac,#7c82ff);color:#fff;font-size:0.56rem;font-weight:800;padding:0.04rem 0.28rem;border-radius:7px}
+
+/* 扩展四宫格确认弹窗：原提示词只读框 + 操作行 */
+.sb-exp-origin{background:var(--bg3);border:1px solid var(--bd);border-radius:10px;padding:0.55rem 0.7rem;
+    font-size:0.8rem;color:var(--t2);line-height:1.5;max-height:120px;overflow:auto}
+.sb-exp-actions{display:flex;align-items:center;gap:0.6rem;flex-wrap:wrap;margin-top:0.7rem}

@@ -250,7 +250,7 @@ const StoryboardModule = {
                     <button class="btn-ghost btn-tiny" onclick="StoryboardModule.uploadSingleImage('${g.id}')">📁 上传</button>
                     <button class="btn-ghost btn-tiny ${expGenning ? 'btn-disabled' : ''}" id="siExpBtn_${g.id}" ${expGenning ? 'disabled' : ''}
                         title="用大模型把这条分镜改写成4格连续剧情，并以前后分镜衔接生成四宫格"
-                        onclick="${expGenning ? '' : `StoryboardModule.expandSingleToQuad('${g.id}')`}">${expGenning ? '⏳ 扩展中' : (expanded ? '🔄 重扩展' : '🔢 扩展四宫格')}</button>
+                        onclick="${expGenning ? '' : `StoryboardModule.openExpandQuadModal('${g.id}')`}">${expGenning ? '⏳ 扩展中' : (expanded ? '🔄 重扩展' : '🔢 扩展四宫格')}</button>
                     ${expanded ? `<button class="btn-ghost btn-tiny btn-ghost-danger" title="取消扩展，恢复为单图" onclick="StoryboardModule.collapseSingleQuad('${g.id}')">↩ 收回</button>` : ''}
                     ${imgHistCount > 0 ? `<button class="btn-ghost btn-tiny" title="查看本单分镜的历次生成图像并切换" onclick="StoryboardModule.showSingleImageHistory('${g.id}')">📜 历史(${imgHistCount})</button>` : ''}
                 </div>
@@ -906,7 +906,32 @@ const StoryboardModule = {
 
     // ===== 四宫格组「单个面板」扩展四宫格：把该面板这一格扩成 4 格连续剧情并生成四宫格、切分 =====
     // 结果存在 g.panelQuads[i] = { fourGridImageId, panelImages:[4], lines:[4] }，缩略图显示 🔢4 徽章，点击可看 4 格。
-    async expandPanelToQuad(gid, i) {
+    // 面板扩展确认弹窗：显示该面板原提示词，可 AI 改写为 4 句、手动编辑后生成四宫格
+    openPanelExpandModal(gid, i) {
+        i = parseInt(i, 10) || 0;
+        const p = Storage.getProject(this.projectId);
+        const g = (p.storyboardGroups || []).find(x => x.id === gid);
+        if (!g) return;
+        const cur = ((g.localPrompts || [])[i] || g.globalPrompt || '').trim();
+        if (!cur) { App.showToast('请先填写该面板的 local 提示词再扩展', 'info'); return; }
+        const lines = (g.panelQuadLines && g.panelQuadLines[i] && g.panelQuadLines[i].length) ? g.panelQuadLines[i] : ['', '', '', ''];
+        this._renderExpandModal({
+            title: `🔢 面板${i + 1} 扩展为四宫格`,
+            origin: cur,
+            lines,
+            rewriteCall: `StoryboardModule.aiRewriteQuadLines('panel','${gid}',${i})`,
+            confirmCall: `StoryboardModule.confirmPanelExpandQuad('${gid}',${i})`,
+        });
+    },
+
+    confirmPanelExpandQuad(gid, i) {
+        const lines = this._readExpandLines();
+        App.closeModal();
+        this.expandPanelToQuad(gid, i, lines);
+    },
+
+    // presetLines 存在时跳过 AI 改写，直接用这 4 句生图
+    async expandPanelToQuad(gid, i, presetLines) {
         i = parseInt(i, 10) || 0;
         const p = Storage.getProject(this.projectId);
         const g = (p.storyboardGroups || []).find(x => x.id === gid);
@@ -914,7 +939,7 @@ const StoryboardModule = {
         const cur = ((g.localPrompts || [])[i] || g.globalPrompt || '').trim();
         if (!cur) { App.showToast('请先填写该面板的 local 提示词再扩展', 'info'); return; }
         const llm = SettingsModule.getLlmConfig();
-        if (!llm.key) { App.showToast('请先在设置页填写文本大模型 API Key', 'error'); return; }
+        if (!Array.isArray(presetLines) && !llm.key) { App.showToast('请先在设置页填写文本大模型 API Key', 'error'); return; }
 
         const s = Storage.getSettings();
         const apiGroups = s.imageApiGroups || [];
@@ -927,16 +952,23 @@ const StoryboardModule = {
         if (btn) { btn.disabled = true; btn.textContent = '⏳ 改写中'; }
         this._polls[pollKey] = 'pending';
         try {
-            // 1) 大模型把该面板改写成 4 句连续剧情
-            const r = await API.post('/api/llm/optimize_prompt', {
-                mode: 'expand', prompt: cur, script: p.script || '',
-                system_prompt: llm.expandPrompt,
-                api_url: llm.url, api_key: llm.key, model: llm.model,
-            });
-            if (!r.success) throw new Error(r.error || '改写失败');
-            const lines = (r.lines && r.lines.length ? r.lines : (r.text || '').split('\n'))
-                .map(x => (x || '').trim()).filter(Boolean).slice(0, 4);
-            while (lines.length < 4) lines.push(cur);
+            let lines;
+            if (Array.isArray(presetLines)) {
+                lines = presetLines.map(x => (x || '').trim());
+                while (lines.length < 4) lines.push('');
+                lines = lines.slice(0, 4).map(x => x || cur);
+            } else {
+                // 1) 大模型把该面板改写成 4 句连续剧情
+                const r = await API.post('/api/llm/optimize_prompt', {
+                    mode: 'expand', prompt: cur, script: p.script || '',
+                    system_prompt: llm.expandPrompt,
+                    api_url: llm.url, api_key: llm.key, model: llm.model,
+                });
+                if (!r.success) throw new Error(r.error || '改写失败');
+                lines = (r.lines && r.lines.length ? r.lines : (r.text || '').split('\n'))
+                    .map(x => (x || '').trim()).filter(Boolean).slice(0, 4);
+                while (lines.length < 4) lines.push(cur);
+            }
 
             const quadPrompt = '请生成一张 2×2 四宫格连续分镜图（顺序：左上→右上→左下→右下），四格剧情连续、'
                 + '人物外形服装画风光线保持一致、格间动作平滑过渡，避免任何字幕文字。四格内容分别为：\n'
@@ -1095,15 +1127,112 @@ const StoryboardModule = {
         document.getElementById('modalOverlay').classList.add('active');
     },
 
+    // 扩展确认弹窗（单分镜）：显示原提示词，可一键 AI 改写为 4 句、手动编辑后再生成四宫格
+    openExpandQuadModal(gid) {
+        const p = Storage.getProject(this.projectId);
+        const g = (p.storyboardGroups || []).find(x => x.id === gid);
+        if (!g) return;
+        const cur = (g.prompt || '').trim();
+        if (!cur) { App.showToast('请先填写画面提示词再扩展', 'info'); return; }
+        const lines = (g.expandLines && g.expandLines.length) ? g.expandLines : ['', '', '', ''];
+        this._renderExpandModal({
+            title: '🔢 扩展为四宫格（连续 4 格剧情）',
+            origin: cur,
+            lines,
+            rewriteCall: `StoryboardModule.aiRewriteQuadLines('single','${gid}')`,
+            confirmCall: `StoryboardModule.confirmExpandQuad('${gid}')`,
+        });
+    },
+
+    // 通用扩展弹窗渲染（单分镜 / 面板共用）
+    _renderExpandModal(opt) {
+        const lns = opt.lines || ['', '', '', ''];
+        const boxes = [0, 1, 2, 3].map(i => `
+            <div class="form-group" style="margin-bottom:0.55rem">
+                <label class="form-label">第 ${i + 1} 格</label>
+                <textarea class="form-textarea" id="expLine${i}" style="min-height:54px" placeholder="第${i + 1}格画面描述…">${this.esc(lns[i] || '')}</textarea>
+            </div>`).join('');
+        const mc = document.getElementById('modalContent');
+        mc.innerHTML = `
+        <div class="modal-header"><h2 class="modal-title">${opt.title}</h2><button class="modal-close" onclick="App.closeModal()">×</button></div>
+        <div class="modal-body">
+            <div class="form-group">
+                <label class="form-label">原提示词</label>
+                <div class="sb-exp-origin">${this.esc(opt.origin)}</div>
+            </div>
+            <div class="sb-exp-actions">
+                <button class="btn-secondary btn-small" id="expRewriteBtn" onclick="${opt.rewriteCall}">✨ 用大模型改写为 4 句连续剧情</button>
+                <span class="form-hint" style="margin:0">可手动编辑下面 4 格，留空将用原提示词兜底</span>
+            </div>
+            <div id="expLinesWrap" style="margin-top:0.7rem">${boxes}</div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn-secondary" onclick="App.closeModal()">取消</button>
+            <button class="btn-primary" onclick="${opt.confirmCall}">🎨 生成四宫格</button>
+        </div>`;
+        document.getElementById('modalOverlay').classList.add('active');
+    },
+
+    // 弹窗内：调用大模型把原提示词改写为 4 句，填进 4 个文本框
+    async aiRewriteQuadLines(scope, gid, i) {
+        const p = Storage.getProject(this.projectId);
+        const g = (p.storyboardGroups || []).find(x => x.id === gid);
+        if (!g) return;
+        let cur = '';
+        if (scope === 'single') cur = (g.prompt || '').trim();
+        else cur = ((g.localPrompts || [])[parseInt(i, 10) || 0] || g.globalPrompt || '').trim();
+        if (!cur) { App.showToast('原提示词为空', 'info'); return; }
+        const llm = SettingsModule.getLlmConfig();
+        if (!llm.key) { App.showToast('请先在设置页填写文本大模型 API Key', 'error'); return; }
+        const btn = document.getElementById('expRewriteBtn');
+        if (btn) { btn.disabled = true; btn.textContent = '⏳ 改写中…'; }
+        try {
+            const r = await API.post('/api/llm/optimize_prompt', {
+                mode: 'expand', prompt: cur, script: p.script || '',
+                system_prompt: llm.expandPrompt,
+                api_url: llm.url, api_key: llm.key, model: llm.model,
+            });
+            if (!r.success) throw new Error(r.error || '改写失败');
+            const lines = (r.lines && r.lines.length ? r.lines : (r.text || '').split('\n'))
+                .map(x => (x || '').trim()).filter(Boolean).slice(0, 4);
+            while (lines.length < 4) lines.push(cur);
+            for (let k = 0; k < 4; k++) {
+                const ta = document.getElementById('expLine' + k);
+                if (ta) ta.value = lines[k] || '';
+            }
+            App.showToast('已改写为 4 句，可继续编辑后生成', 'success');
+        } catch (e) {
+            App.showToast('改写失败：' + (e.message || e), 'error');
+        } finally {
+            if (btn) { btn.disabled = false; btn.textContent = '✨ 用大模型改写为 4 句连续剧情'; }
+        }
+    },
+
+    // 弹窗内读取 4 框文本
+    _readExpandLines() {
+        return [0, 1, 2, 3].map(k => {
+            const ta = document.getElementById('expLine' + k);
+            return ta ? (ta.value || '').trim() : '';
+        });
+    },
+
+    // 确认生成（单分镜）：用弹窗里编辑好的 4 句直接生成四宫格
+    confirmExpandQuad(gid) {
+        const lines = this._readExpandLines();
+        App.closeModal();
+        this.expandSingleToQuad(gid, lines);
+    },
+
     // 扩展：把单条分镜用大模型改写成 4 句连续剧情，再以前后分镜衔接生成四宫格并切分
-    async expandSingleToQuad(gid) {
+    // presetLines 存在时跳过 AI 改写，直接用这 4 句生图
+    async expandSingleToQuad(gid, presetLines) {
         const p = Storage.getProject(this.projectId);
         const g = (p.storyboardGroups || []).find(x => x.id === gid);
         if (!g) return;
         const cur = (g.prompt || '').trim();
         if (!cur) { App.showToast('请先填写画面提示词再扩展', 'info'); return; }
         const llm = SettingsModule.getLlmConfig();
-        if (!llm.key) { App.showToast('请先在设置页填写文本大模型 API Key', 'error'); return; }
+        if (!Array.isArray(presetLines) && !llm.key) { App.showToast('请先在设置页填写文本大模型 API Key', 'error'); return; }
 
         const s = Storage.getSettings();
         const apiGroups = s.imageApiGroups || [];
@@ -1115,18 +1244,26 @@ const StoryboardModule = {
         if (btn) { btn.disabled = true; btn.textContent = '⏳ 改写中'; }
         this._polls['si_exp_' + gid] = 'pending';
         try {
-            // 1) 用大模型把这条分镜改写成 4 行连续剧情
-            const r = await API.post('/api/llm/optimize_prompt', {
-                mode: 'expand',
-                prompt: cur,
-                script: p.script || '',
-                system_prompt: llm.expandPrompt,
-                api_url: llm.url, api_key: llm.key, model: llm.model,
-            });
-            if (!r.success) throw new Error(r.error || '改写失败');
-            const lines = (r.lines && r.lines.length ? r.lines : (r.text || '').split('\n'))
-                .map(x => (x || '').trim()).filter(Boolean).slice(0, 4);
-            while (lines.length < 4) lines.push(cur);
+            let lines;
+            if (Array.isArray(presetLines)) {
+                // 弹窗已编辑好的 4 句：空格用原提示词兜底
+                lines = presetLines.map(x => (x || '').trim());
+                while (lines.length < 4) lines.push('');
+                lines = lines.slice(0, 4).map(x => x || cur);
+            } else {
+                // 1) 用大模型把这条分镜改写成 4 行连续剧情
+                const r = await API.post('/api/llm/optimize_prompt', {
+                    mode: 'expand',
+                    prompt: cur,
+                    script: p.script || '',
+                    system_prompt: llm.expandPrompt,
+                    api_url: llm.url, api_key: llm.key, model: llm.model,
+                });
+                if (!r.success) throw new Error(r.error || '改写失败');
+                lines = (r.lines && r.lines.length ? r.lines : (r.text || '').split('\n'))
+                    .map(x => (x || '').trim()).filter(Boolean).slice(0, 4);
+                while (lines.length < 4) lines.push(cur);
+            }
             g.expandLines = lines;
 
             // 2) 组装四宫格提示词：要求 2×2 连续四格，逐格描述
@@ -1510,7 +1647,7 @@ emotions: this._collectEmotions(),
                 </div>
                 <div class="sb-local-thumb-acts">
                     <button class="btn-ghost btn-tiny sb-local-replace" title="从以往生成的任意图像中选一张替换本面板的画面" onclick="event.stopPropagation();StoryboardModule.replacePanelImage('${g.id}',${i})">🔄 替换</button>
-                    <button class="btn-ghost btn-tiny ${this._polls['pq_' + g.id + '_' + i] ? 'btn-disabled' : ''}" id="pqBtn_${g.id}_${i}" title="把这个面板用大模型扩成4格连续剧情并生成四宫格" onclick="event.stopPropagation();StoryboardModule.expandPanelToQuad('${g.id}',${i})">${this._polls['pq_' + g.id + '_' + i] ? '⏳ 扩展中' : '🔢 扩展'}</button>
+                    <button class="btn-ghost btn-tiny ${this._polls['pq_' + g.id + '_' + i] ? 'btn-disabled' : ''}" id="pqBtn_${g.id}_${i}" title="把这个面板用大模型扩成4格连续剧情并生成四宫格" onclick="event.stopPropagation();StoryboardModule.openPanelExpandModal('${g.id}',${i})">${this._polls['pq_' + g.id + '_' + i] ? '⏳ 扩展中' : '🔢 扩展'}</button>
                 </div>
             </div>
             <div class="sb-local-main">
