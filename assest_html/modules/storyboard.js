@@ -442,17 +442,38 @@ const StoryboardModule = {
             }));
         });
         // 四宫格成品图 / 切分 panel 图 / 单分镜图（ownerType=storyboards）
-        // ownerId 形如：<gid>_quad（四宫格成品）/ <gid>_panelN（切分第N格）/ <gid>_single（单图）/ <gid>
+        // ownerId 后缀历史上有多种：<gid>_quad、<gid>_mockgrid（四宫格成品）；<gid>_panelN、<gid>_pqN_panelM（切分）；
+        // <gid>_single（单图）；以及「裸 gid」（早期四宫格成品图直接以组 id 作 ownerId）。
+        // 为稳妥识别「四宫格成品图」，不再仅靠 ownerId 后缀，而是优先用各分镜组的 g.fourGridImageId 字段建立 mediaId→该组 的映射。
         const sbGroups = p.storyboardGroups || [];
         const gidIndex = (gid) => sbGroups.findIndex(x => String(x.id) === String(gid));
+        // mediaId(四宫格成品图) → { gid }，由分镜组的 fourGridImageId 反查
+        const quadIdToGid = {};
+        sbGroups.forEach(g => {
+            if (g && g.fourGridImageId != null) quadIdToGid[String(g.fourGridImageId)] = String(g.id);
+        });
+        // 把 ownerId 去掉已知后缀，得到所属分镜组 gid（兼容 _mockgrid/_quad/_panelN/_pqK_panelN/_pqK/_single）
+        const gidOfOwner = (owner) => {
+            let mm;
+            if ((mm = owner.match(/^(.+?)_pq\d+_panel\d+$/))) return mm[1];
+            if ((mm = owner.match(/^(.+?)_pq\d+$/))) return mm[1];
+            if ((mm = owner.match(/^(.+?)_panel\d+$/))) return mm[1];
+            if ((mm = owner.match(/^(.+?)_(quad|mockgrid|single)$/))) return mm[1];
+            return owner;   // 裸 gid
+        };
         const sbImgs = lib.filter(m => m.type === 'image' && m.ownerType === 'storyboards');
         sbImgs.forEach(m => {
             const owner = String(m.ownerId || '');
-            let gid = owner, kind = 'other', panelIdx = -1;
+            let kind = 'other', panelIdx = -1;
             let mm;
-            if ((mm = owner.match(/^(.+)_panel(\d+)$/))) { gid = mm[1]; kind = 'panel'; panelIdx = parseInt(mm[2], 10); }
-            else if ((mm = owner.match(/^(.+)_quad$/))) { gid = mm[1]; kind = 'quad'; }
-            else if ((mm = owner.match(/^(.+)_single$/))) { gid = mm[1]; kind = 'single'; }
+            // 1) 切分图：_panelN 或 _pqK_panelN（面板扩展切分）
+            if ((mm = owner.match(/_panel(\d+)$/))) { kind = 'panel'; panelIdx = parseInt(mm[1], 10); }
+            // 2) 四宫格成品图：① 命中某分镜组 fourGridImageId（最可靠）；② 或 ownerId 以 _quad/_mockgrid 结尾
+            else if (quadIdToGid[String(m.id)] != null || /_(quad|mockgrid)$/.test(owner)) { kind = 'quad'; }
+            // 3) 单图
+            else if (/_single$/.test(owner)) { kind = 'single'; }
+            // gid：四宫格成品图优先用 fourGridImageId 反查到的组；否则按 ownerId 去后缀
+            const gid = (kind === 'quad' && quadIdToGid[String(m.id)] != null) ? quadIdToGid[String(m.id)] : gidOfOwner(owner);
             const gi = gidIndex(gid);
             const sbNo = gi >= 0 ? gi + 1 : null;
             const kindLabel = kind === 'quad' ? '四宫格' : (kind === 'panel' ? `切分第${panelIdx + 1}格` : (kind === 'single' ? '单图' : '分镜图'));
@@ -477,52 +498,61 @@ const StoryboardModule = {
             if (items.length) blocks.push({ title: label, tag: '', items });
         });
         // 2) 分镜图分块：
-        //    - 只有「四宫格成品图(quad) / 切分图(panel)」才进对应分镜块，每 5 张一行、整行发光框；
-        //    - 其它图（单图 single / 杂项 other / 没有归属分镜的）统一收进「🎞️ 其它分镜图」块，平铺、不发光。
+        //    - 「四宫格成品图(quad) / 切分图(panel)」按所属分镜组(sbGroupId) 分块，每行严格 5 张、整行发光；
+        //      有 quad 时 quad 放该行第一列 + 它的 4 张切分；无 quad 则切分图每行 5 张（首列即切分图）。
+        //    - 其它图（单图 single / 杂项 other / 无 gid 归属）统一收进「🎞️ 其它分镜图」块，平铺、不发光。
         const sbAll = all.filter(a => a.group === '🎞️ 四宫格/切分');
         const isGridKind = (a) => a.sbKind === 'quad' || a.sbKind === 'panel';
-        const byNo = {};
-        const otherSb = [];   // 非四宫格/切分图：单图、杂项、无分镜归属的，统一另成一块
+        const byGid = {};            // sbGroupId -> 该组的 quad/panel 图（按库顺序）
+        const gidOrder = [];         // 维持分组首次出现的顺序
+        const gidSbNo = {};          // sbGroupId -> sbNo（用于标题「分镜N」，孤儿组为 null）
+        const otherSb = [];          // 非四宫格/切分图：单图、杂项、无 gid 归属
         sbAll.forEach(a => {
-            if (a.sbNo != null && isGridKind(a)) {
-                (byNo[a.sbNo] = byNo[a.sbNo] || []).push(a);
+            if (a.sbGroupId != null && isGridKind(a)) {
+                const g = String(a.sbGroupId);
+                if (byGid[g] == null) { byGid[g] = []; gidOrder.push(g); gidSbNo[g] = a.sbNo; }
+                byGid[g].push(a);
             } else {
                 otherSb.push(a);
             }
         });
-        // 2a) 每个分镜：每行严格 5 张、整行发光。
-        //     规则：① 有四宫格成品图(quad) 时，每个 quad 起一行放在「第一列」，后接它的 4 张切分图(panel)；
-        //          ② 没有 quad（或 quad 用完后剩余的 panel）时，切分图按每行 5 张排列、整行发光（首列就是切分图，不强求四宫格）。
-        //     在尊重 mediaLibrary 顺序（拖动结果）的前提下组织：quad/panel 各自保持库内相对顺序。
-        Object.keys(byNo)
-            .sort((x, y) => (+x) - (+y))
-            .forEach(k => {
-                const list = byNo[k];                              // 库顺序（含拖动结果）
-                const quads = list.filter(a => a.sbKind === 'quad');   // 四宫格成品图，按库顺序
-                const panels = list.filter(a => a.sbKind === 'panel'); // 切分图，按库顺序
+        // 2a) 每个分镜组：每行严格 5 张、整行发光。有 sbNo 的按 sbNo 升序在前，孤儿组(无 sbNo) 排其后。
+        gidOrder
+            .sort((x, y) => {
+                const nx = gidSbNo[x], ny = gidSbNo[y];
+                if (nx != null && ny != null) return nx - ny;
+                if (nx != null) return -1;
+                if (ny != null) return 1;
+                return 0;
+            })
+            .forEach(g => {
+                const list = byGid[g];                                 // 库顺序（含拖动结果）
+                const quads = list.filter(a => a.sbKind === 'quad');   // 四宫格成品图
+                const panels = list.filter(a => a.sbKind === 'panel'); // 切分图
                 const rows = [];
-                // ① 每个四宫格领头一行：首列 quad + 紧随的 4 张切分图（按库顺序每 4 张一组分配）
+                // ① 每个四宫格领头一行：首列 quad + 紧随的 4 张切分图
                 quads.forEach((q, qi) => {
                     const group = panels.slice(qi * 4, qi * 4 + 4);
                     rows.push({ cells: [q, ...group], glow: true });
                 });
-                // ② 剩余切分图（多于 quads×4，或本分镜无 quad）：每行 5 张、整行发光
+                // ② 剩余切分图（多于 quads×4，或本组无 quad）：每行 5 张、整行发光
                 const leftover = panels.slice(quads.length * 4);
                 for (let st = 0; st < leftover.length; st += 5) {
                     rows.push({ cells: leftover.slice(st, st + 5), glow: true });
                 }
+                const no = gidSbNo[g];
                 blocks.push({
-                    title: `🎬 分镜${k}`,
+                    title: no != null ? `🎬 分镜${no}` : '🎬 历史分镜组',
                     tag: quads.length ? '每行：四宫格 + 4 张切分' : '每行 5 张为一组',
                     items: list,
                     rows,
                 });
             });
-        // 2b) 其它图（非四宫格/切分）：平铺一块，不发光；同样保持 mediaLibrary 顺序（尊重拖动结果）
+        // 2b) 其它图（非四宫格/切分）：平铺一块，不发光；保持 mediaLibrary 顺序（尊重拖动结果）
         if (otherSb.length) {
             blocks.push({ title: '🎞️ 其它分镜图', tag: '', items: otherSb });
         }
-        return blocks;
+                return blocks;
     },
 
     // 统一渲染「历史图像选择」分块。mode: 'multi'(多选checkbox) | 'single'(单选点击)
