@@ -1467,3 +1467,7 @@ border:none;border-radius:50%;background:rgba(0,0,0,0.62);color:#fff;font-size:0
 .sb-exp-ref-add{width:64px;height:64px;border:1px dashed var(--bd);border-radius:8px;background:var(--bg3);
 color:var(--t2);font-size:0.62rem;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0 0.3rem;text-align:center}
 .sb-exp-ref-add:hover{border-color:var(--ac,#7c82ff);color:var(--ac,#7c82ff)}
+/* 扩展弹窗内「前后衔接图」：只读展示，左下角标签 + 无图占位 */
+.sb-exp-neighbor-tag{position:absolute;left:0;right:0;bottom:0;font-size:0.56rem;line-height:1.3;
+padding:1px 3px;background:rgba(0,0,0,0.6);color:#fff;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sb-exp-ref-empty{display:flex;align-items:center;justify-content:center;border-style:dashed}

@@ -1187,8 +1187,13 @@ const StoryboardModule = {
         if (!g) return;
         const cur = (g.prompt || '').trim();
         if (!cur) { App.showToast('请先填写画面提示词再扩展', 'info'); return; }
+        // 持久化恢复：优先用上次保存的 expandCtx（指令 / 参考图说明 / 四宫格描述），
+        // 否则回退到旧的 expandLines（4 句）。这样生成后下次打开仍能看到，直到下次重新优化。
+        const savedCtx = g.expandCtx || {};
         const lines = (g.expandLines && g.expandLines.length) ? g.expandLines : [];
-        const desc = lines.filter(Boolean).map((t, k) => `第${k + 1}格：${t}`).join('\n');
+        const desc = (savedCtx.desc && savedCtx.desc.trim())
+            ? savedCtx.desc
+            : lines.filter(Boolean).map((t, k) => `第${k + 1}格：${t}`).join('\n');
         // 默认参考图：本分镜已选参考图
         this._expandRefIds = (g.refImageIds || []).map(Number).filter(v => !isNaN(v));
         this._lastRefDescDefault = '';
@@ -1196,7 +1201,10 @@ const StoryboardModule = {
             title: '🔢 扩展为四宫格（连续 4 格剧情）',
             origin: cur,
             desc,
+            instr: savedCtx.instr,      // 恢复上次的指令（undefined 时用默认模板）
+            refDesc: savedCtx.refDesc,  // 恢复上次的参考图说明
             gid,
+            neighborGid: gid,   // 单分镜扩展：在弹窗内展示前后衔接图（自动随生图一起作为参考）
             rewriteCall: `StoryboardModule.aiRewriteQuadLines('single','${gid}')`,
             confirmCall: `StoryboardModule.confirmExpandQuad('${gid}')`,
         });
@@ -1216,22 +1224,23 @@ const StoryboardModule = {
                 <label class="form-label">原提示词</label>
                 <div class="sb-exp-origin">${this.esc(opt.origin)}</div>
             </div>
-            <div class="form-group" style="margin-top:0.6rem">
-                <label class="form-label">① 生成四宫格的提示语（指令，可修改）</label>
-                <textarea class="form-textarea" id="expInstr" style="min-height:64px" placeholder="生成四宫格的指令…">${this.esc(instr)}</textarea>
-            </div>
-            <div class="form-group" style="margin-top:0.6rem">
-                <label class="form-label">② 参考图说明（@图N 是什么，可修改）</label>
-                <div id="expRefWrap"></div>
-                <textarea class="form-textarea" id="expRefDesc" style="min-height:64px;margin-top:0.5rem" placeholder="例如：@图1 是主角正面定妆照；@图2 是上一镜结尾画面…">${this.esc(opt.refDesc || '')}</textarea>
-                <span class="form-hint">增删参考图后会自动补全默认说明，可手动修改</span>
-            </div>
             <div class="sb-exp-actions" style="margin-top:0.6rem">
                 <button class="btn-secondary btn-small" id="expRewriteBtn" onclick="${opt.rewriteCall}">✨ 用大模型改写四宫格描述</button>
             </div>
             <div class="form-group" style="margin-top:0.5rem">
-                <label class="form-label">③ 优化后的四宫格描述（连续 4 格剧情，可修改）</label>
+                <label class="form-label">① 优化后的四宫格描述（连续 4 格剧情，可修改）</label>
                 <textarea class="form-textarea" id="expDesc" style="min-height:140px" placeholder="左上→右上→左下→右下，四格连续剧情…">${this.esc(desc)}</textarea>
+            </div>
+            <div class="form-group" style="margin-top:0.6rem">
+                <label class="form-label">② 生成四宫格的提示语（指令，可修改）</label>
+                <textarea class="form-textarea" id="expInstr" style="min-height:64px" placeholder="生成四宫格的指令…">${this.esc(instr)}</textarea>
+            </div>
+            <div class="form-group" style="margin-top:0.6rem">
+                <label class="form-label">③ 参考图说明（@图N 是什么，可修改）</label>
+                <div id="expRefWrap"></div>
+                <textarea class="form-textarea" id="expRefDesc" style="min-height:64px;margin-top:0.5rem" placeholder="例如：@图1 是主角正面定妆照；@图2 是上一镜结尾画面…">${this.esc(opt.refDesc || '')}</textarea>
+                <span class="form-hint">增删参考图后会自动补全默认说明，可手动修改</span>
+                ${opt.neighborGid ? '<div id="expNeighborWrap"></div>' : ''}
             </div>
         </div>
         <div class="modal-footer">
@@ -1240,6 +1249,26 @@ const StoryboardModule = {
         </div>`;
         document.getElementById('modalOverlay').classList.add('active');
         this._renderExpandRefs();
+        if (opt.neighborGid) this._renderExpandNeighbors(opt.neighborGid);
+    },
+
+    // 在扩展弹窗内只读展示「前后衔接图」：上一分镜末图、下一分镜首图。
+    // 这两张图不在「已选参考图」里，但生成四宫格时会自动随 ref_images 一起发给模型，
+    // 此处展示是为了让用户清楚知道生图会带上它们做前后衔接（不可增删）。
+    _renderExpandNeighbors(gid) {
+        const wrap = document.getElementById('expNeighborWrap');
+        if (!wrap) return;
+        const p = Storage.getProject(this.projectId);
+        const { prevUrl, nextUrl } = this._neighborEdgeImages(p, gid);
+        const cell = (url, label) => url
+            ? `<div class="sb-exp-ref-cell" title="${label}（自动作为参考，不可移除）"><img src="${url}" loading="lazy"><span class="sb-exp-neighbor-tag">${label}</span></div>`
+            : `<div class="sb-exp-ref-cell sb-exp-ref-empty" title="${label}：无可用图"><span class="sb-dim-hint" style="font-size:0.65rem;text-align:center;padding:0 4px">${label}<br>无</span></div>`;
+        wrap.innerHTML = `
+            <div class="form-hint" style="margin:0.5rem 0 0.25rem">前后衔接图（自动参考，生成时随上面参考图一起发给模型）：</div>
+            <div class="sb-exp-ref-list">
+                ${cell(prevUrl, '上一分镜末图')}
+                ${cell(nextUrl, '下一分镜首图')}
+            </div>`;
     },
 
     // 四宫格生成指令默认模板
@@ -1445,6 +1474,9 @@ const StoryboardModule = {
             if (ctx.refDesc && ctx.refDesc.trim()) {
                 quadPrompt += '\n\n参考图说明：\n' + ctx.refDesc.trim();
             }
+            // 持久化保存本次弹窗里编辑的三段（指令 / 参考图说明 / 四宫格描述），
+            // 供下次打开扩展弹窗时恢复显示，直到下次重新优化。
+            g.expandCtx = { instr, refDesc: (ctx.refDesc || '').trim(), desc: descPart };
 
             // 3) 收集参考图：弹窗选中的参考图（若有）否则本分镜参考图 + 前一分镜末图 + 后一分镜首图（用于前后衔接）
             const refB64 = [];
