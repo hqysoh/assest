@@ -252,14 +252,61 @@ const StoryboardModule = {
             x.single && x.inlineParent === gid && (parseInt(x.inlinePanel, 10) || 0) === panelIdx);
     },
 
+    // ===== 构建「画面序列」：把所有分镜组按时间轴顺序展开成一串『画面』。
+    // 每个画面 = { kind:'panel'|'single', gid, panel, mediaId }。mediaId 为该画面代表图（可能为 null，未生成）。
+    // 用于推算某个单分镜的「前一帧 / 后一帧」默认参考图。展开规则（与合成顺序一致，但编辑期全量、不看勾选）：
+    //   - 四宫格组：4 个面板各为一个画面（panelImages[i]），每个面板后紧跟它在该格的内嵌单分镜（按库顺序，imageId）。
+    //   - 顶层单分镜：一个画面（imageId）。
+    _buildFrameSeq() {
+        const p = Storage.getProject(this.projectId);
+        const groups = p.storyboardGroups || [];
+        const seq = [];
+        groups.forEach(g => {
+            if (!g) return;
+            if (g.inlineParent) return;   // 内嵌单分镜由其父组面板循环负责插入，顶层跳过避免重复
+            if (g.single) {
+                seq.push({ kind: 'single', gid: g.id, panel: 0, mediaId: g.imageId != null ? g.imageId : null });
+                return;
+            }
+            // 四宫格组：4 个面板，每格后挂它的内嵌单分镜
+            for (let i = 0; i < 4; i++) {
+                const imgId = (g.panelImages || [])[i];
+                seq.push({ kind: 'panel', gid: g.id, panel: i, mediaId: imgId != null ? imgId : null });
+                this._inlineSinglesOf(g.id, i).forEach(sg => {
+                    seq.push({ kind: 'single', gid: sg.id, panel: 0, mediaId: sg.imageId != null ? sg.imageId : null });
+                });
+            }
+        });
+        return seq;
+    },
+
+    // 取某单分镜 g 在「画面序列」里的前一帧 / 后一帧代表图 mediaId（找不到/未生成则为 null）。
+    // 返回 { prevId, nextId }。
+    _neighborFrameIds(g) {
+        if (!g) return { prevId: null, nextId: null };
+        const seq = this._buildFrameSeq();
+        const idx = seq.findIndex(s => s.kind === 'single' && String(s.gid) === String(g.id));
+        if (idx < 0) return { prevId: null, nextId: null };
+        const prev = idx > 0 ? seq[idx - 1] : null;
+        const next = idx < seq.length - 1 ? seq[idx + 1] : null;
+        return {
+            prevId: prev && prev.mediaId != null ? prev.mediaId : null,
+            nextId: next && next.mediaId != null ? next.mediaId : null,
+        };
+    },
+
     // 渲染「内嵌在四宫格里的单分镜」行：复用单分镜卡片，外层包一个 sb-inline-single 容器（不同底色 + 可删除）。
     renderInlineSingleRow(parentGroup, sg) {
         // 复用 renderSingleCard 生成完整单分镜卡片（含生成/上传/参考图/台词/配音/历史/删除等全部能力）
         const card = this.renderSingleCard(sg, 0);
-        const panelLabel = (parseInt(sg.inlinePanel, 10) || 0) + 1;
+        const panelIdx = parseInt(sg.inlinePanel, 10) || 0;
+        const panelLabel = panelIdx + 1;
         return `<div class="sb-inline-single" title="内嵌单分镜：合成视频时插在第 ${panelLabel} 格之后">
             <div class="sb-inline-single-tag">↳ 内嵌单分镜（第 ${panelLabel} 格后）</div>
             ${card}
+            <div class="sb-inline-single-add">
+                <button class="btn-ghost btn-tiny" title="在本内嵌单分镜之后再插入一个内嵌单分镜（前一帧默认取上一个内嵌单分镜的成品图）" onclick="StoryboardModule.insertSingleInGroup('${parentGroup.id}',${panelIdx})">＋ 在此后再加单分镜</button>
+            </div>
         </div>`;
     },
 
@@ -273,8 +320,6 @@ const StoryboardModule = {
         const audGenning = !!this._polls['si_aud_' + g.id];
         const imgErr = g.imageError || '';
         const refImgCount = (g.refImageIds || []).length;
-        const refAud = g.refAudioId != null ? Storage.getMediaById(this.projectId, g.refAudioId) : null;
-        const refAudUrl = refAud ? Storage.mediaUrl(refAud.data) : '';
         const d = g.dialogue || {};
 
         const imgHistCount = Storage.getMediaForItem(this.projectId, 'storyboards', g.id + '_single').filter(m => m.type === 'image').length;
@@ -292,10 +337,11 @@ const StoryboardModule = {
         return `<div class="list-row sb-single-row ${marked ? 'sb-marked' : (selected ? 'sb-picked' : '')}" id="sbRow_${g.id}">
             <div class="list-row-img-section">
                 ${imgArea}
-                <div class="list-img-btns">
+                <div class="list-img-btns sb-single-img-btns">
                     <button class="btn-ghost btn-tiny ${imgGenning ? 'btn-disabled' : ''}" id="siImgBtn_${g.id}" ${imgGenning ? 'disabled' : ''}
-                        onclick="${imgGenning ? '' : `StoryboardModule.genSingleImage('${g.id}')`}">${imgGenning ? '⏳ 生成中' : '🎨 生成'}</button>
+                        onclick="${imgGenning ? '' : `StoryboardModule.openSingleGenModal('${g.id}')`}">${imgGenning ? '⏳ 生成中' : '🎨 生成'}</button>
                     <button class="btn-ghost btn-tiny" onclick="StoryboardModule.uploadSingleImage('${g.id}')">📁 上传</button>
+                    <button class="btn-ghost btn-tiny" title="从历史/素材库选一张图直接替换当前画面" onclick="StoryboardModule.replaceSingleImage('${g.id}')">🔄 替换</button>
                     ${imgHistCount > 0 ? `<button class="btn-ghost btn-tiny" title="查看本单分镜的历次生成图像并切换" onclick="StoryboardModule.showSingleImageHistory('${g.id}')">📜 历史(${imgHistCount})</button>` : ''}
                 </div>
                 ${imgErr && !imgGenning ? this._singleImgErrorTag(g.id, imgErr) : ''}
@@ -313,54 +359,43 @@ const StoryboardModule = {
                 <div class="list-row-meta">
                     <div class="meta-section">
                         <div class="meta-header">
-                            <span class="meta-label">画面提示词</span>
+                            <span class="meta-label">local 提示语</span>
                             <span class="sb-prompt-actions">
                                 <button class="btn-ghost btn-tiny" id="optBtn_${g.id}" title="用大模型结合剧本优化这条提示语" onclick="StoryboardModule.optimizeLocalPrompt('${g.id}')">✨ 优化</button>
                                 ${g.promptBackup != null ? `<button class="btn-ghost btn-tiny" title="恢复优化前的提示语" onclick="StoryboardModule.restoreLocalPrompt('${g.id}')">↩ 恢复</button>` : ''}
                             </span>
                         </div>
                         ${InlineEdit.field(g.prompt || '', {
-                            placeholder: '点击填写这个分镜的画面提示词…',
+                            placeholder: '点击填写这个分镜的 local 提示语（也是生成弹窗里的画面提示语）…',
                             className: 'meta-content clamp-1',
                             data: { edit: 'sb-single', gid: g.id, field: 'prompt' } })}
                     </div>
-                    <div class="meta-section">
-                        <div class="meta-header">
-                            <span class="meta-label">参考图（${refImgCount} 张）</span>
-                            <button class="btn-ghost btn-tiny" onclick="StoryboardModule.pickRefImages('${g.id}')">＋ 选择参考图</button>
-                        </div>
-                        <div class="meta-content sb-single-refimgs">
-                            ${refImgCount ? this._renderRefImgThumbs(g) : '<span class="sb-dim-hint">未选参考图。可选人物/道具/场景图，或改分镜前生成的四宫格切分图。</span>'}
-                        </div>
-                    </div>
                     <div class="meta-section sb-single-dialogue">
-                        <div class="meta-header">
-                            <span class="meta-label">台词 / 配音</span>
-                            <button class="btn-ghost btn-tiny ${audGenning ? 'btn-disabled' : ''}" id="siAudBtn_${g.id}"
-                                onclick="${audGenning ? '' : `StoryboardModule.openSingleAudioModal('${g.id}')`}">${audGenning ? '⏳ 配音中' : '🔊 配音'}</button>
-                        </div>
                         <div class="meta-content">
-                            <div class="sb-single-line-row">
-                                <div class="sb-single-text-cell">
-                                    ${InlineEdit.field(d.text || '', {
-                                        placeholder: '点击填写台词…',
-                                        className: 'clamp-1',
-                                        data: { edit: 'sb-single-dlg', gid: g.id, field: 'text' } })}
+                            <div class="sb-dlg-line1">
+                                ${this._singleCharSelect(g, d.character || '')}
+                                <div class="sb-local-audio-btns">
+                                    <button class="btn-ghost btn-tiny ${audGenning ? 'btn-disabled' : ''}" id="siAudBtn_${g.id}"
+                                        onclick="${audGenning ? '' : `StoryboardModule.openSingleAudioModal('${g.id}')`}">${audGenning ? '⏳ 配音中' : (audUrl ? '🔄 配音' : '🔊 配音')}</button>
+                                    <button class="btn-ghost btn-tiny ${audUrl ? '' : 'btn-disabled'}" id="siAplay_${g.id}"
+                                        onclick="${audUrl ? `StoryboardModule.toggleSinglePlay('${g.id}')` : ''}">▶ 播放</button>
                                 </div>
-                                <div class="sb-single-tone-cell" title="情绪 / 语气">
+                            </div>
+                            <div class="sb-dlg-line2">
+                                ${InlineEdit.field(d.text || '', {
+                                    placeholder: '点击填写台词…',
+                                    className: 'sb-dlg-text',
+                                    data: { edit: 'sb-single-dlg', gid: g.id, field: 'text' } })}
+                                <span class="sb-dlg-tone-wrap">
                                     <span class="sb-dlg-tone-icon">🎭</span>
                                     ${InlineEdit.field(d.tone || '', {
-                                        single: true, placeholder: '情绪/语气',
-                                        className: 'sb-single-tone clamp-1',
+                                        single: true, placeholder: '语气',
+                                        className: 'sb-dlg-tone clamp-1',
                                         data: { edit: 'sb-single-dlg', gid: g.id, field: 'tone' } })}
-                                </div>
+                                </span>
                             </div>
-                            <div class="sb-single-audio-row">
-                                <span class="sb-dim-hint">参考音色：</span>
-                                ${refAudUrl ? `<audio controls preload="none" src="${refAudUrl}" style="height:30px"></audio>` : '<span class="sb-dim-hint">未选</span>'}
-                                <button class="btn-ghost btn-tiny" onclick="StoryboardModule.pickRefAudio('${g.id}')">选参考音色</button>
-                            </div>
-                            ${audUrl ? `<div class="sb-single-audio-row"><span class="sb-dim-hint">成品配音：</span><audio controls preload="none" src="${audUrl}" style="height:30px"></audio>${App.audioDragHandle(audUrl, `分镜配音_${g.id}.${(aud.mime||'').includes('mpeg')?'mp3':(aud.mime||'').includes('flac')?'flac':'wav'}`, '拖出')}</div>` : ''}
+                            ${audUrl ? `<audio id="siAaudio_${g.id}" preload="none" src="${audUrl}" style="display:none"></audio>` : ''}
+                            ${audUrl ? `<div class="sb-single-audio-row"><span class="sb-dim-hint">成品配音：</span>${App.audioDragHandle(audUrl, `分镜配音_${g.id}.${(aud.mime||'').includes('mpeg')?'mp3':(aud.mime||'').includes('flac')?'flac':'wav'}`, '拖出')}</div>` : ''}
                         </div>
                     </div>
                 </div>
@@ -861,12 +896,195 @@ const StoryboardModule = {
         this.render(this.projectId);
     },
 
+    // 画面提示语默认文案：@图1=前一帧、@图2=后一帧，引导生成衔接二者的中间帧，并把卡片上的 local 提示语内容作为画面内容拼入。
+    _defaultImgPrompt(g) {
+        const local = (g && g.prompt ? g.prompt.trim() : '');
+        const localPart = local ? `画面内容：${local}。` : '';
+        return `@图1为前一帧，@图2为后一帧。请生成一张衔接二者的中间帧：在保持人物外形与服装、场景环境、光线方向与明暗、整体色调、镜头视角与景别连贯一致的前提下，让画面从 @图1 自然过渡到 @图2，过渡平滑、无跳变、无穿帮。${localPart}`;
+    },
+
+    // ===== 单分镜「生成」弹窗（参考四宫格生成弹窗样式）=====
+    // 顶部画面提示语；下方「参考图清单」：每张带 @图N 标签 + 缩略图 + ✕ 移除；底部「＋ 添加参考图」入口。
+    // 默认参考图：图1=时间轴前一帧、图2=后一帧（_neighborFrameIds 推算）；提示语与卡片 local 提示语共用 g.prompt。
+    openSingleGenModal(gid) {
+        const p = Storage.getProject(this.projectId);
+        const g = (p.storyboardGroups || []).find(x => x.id === gid);
+        if (!g) return;
+
+        // 弹窗内有序参考图列表（@图1、@图2… 即此顺序）：已选过沿用 g.refImageIds；否则默认 [前帧, 后帧]。
+        let refIds = (g.refImageIds || []).map(v => parseInt(v)).filter(v => !isNaN(v));
+        if (!refIds.length) {
+            const { prevId, nextId } = this._neighborFrameIds(g);
+            refIds = [prevId, nextId].filter(v => v != null).map(v => parseInt(v));
+            refIds = Array.from(new Set(refIds));
+        } else {
+            refIds = Array.from(new Set(refIds));
+        }
+        this._sgCtx = { gid, refs: refIds };
+
+        // 画面提示语（独立字段 g.imgPrompt）：已填过用它；否则用「@图1/@图2 + 拼入 local 提示语」的默认文案
+        const promptVal = (g.imgPrompt && g.imgPrompt.trim()) ? g.imgPrompt : this._defaultImgPrompt(g);
+
+        const mc = document.getElementById('modalContent');
+        mc.innerHTML = `
+            <div class="modal-header"><h2 class="modal-title">🎨 生成单分镜图</h2><button class="modal-close" onclick="App.closeModal()">×</button></div>
+            <div class="modal-body sb-pick-body">
+                <div class="form-group">
+                    <label class="form-label">画面提示语</label>
+                    <textarea class="form-textarea" id="singleGenPrompt" style="min-height:90px" placeholder="描述要生成的画面…">${this.esc(promptVal)}</textarea>
+                    <p class="form-hint" style="margin-top:0.3rem">开头按 <b>@图1=…、@图2=…</b> 引用下方参考图（下方清单的 @图序号即接口收到的顺序）。默认 @图1=前一帧、@图2=后一帧，可在下面移除/添加。</p>
+                </div>
+                <div class="form-group">
+                    <div class="meta-header">
+                        <span class="meta-label">📷 参考图清单</span>
+                    </div>
+                    <div id="singleGenRefList">${this._renderSingleGenRefs()}</div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-secondary" onclick="App.closeModal()">取消</button>
+                <button class="btn-primary" onclick="StoryboardModule._doSingleGen('${gid}')">▶ 开始生成</button>
+            </div>`;
+        document.getElementById('modalOverlay').classList.add('active');
+    },
+
+    // 渲染单分镜生成弹窗的「参考图清单」：每张 @图N + 缩略图 + ✕ 移除；末尾「＋ 添加参考图」。
+    _renderSingleGenRefs() {
+        const ctx = this._sgCtx || { refs: [] };
+        const refs = ctx.refs || [];
+        const cells = refs.map((mid, i) => {
+            const m = Storage.getMediaById(this.projectId, mid);
+            const url = m ? Storage.mediaUrl(m.data) : '';
+            const thumb = url ? `<img src="${url}" alt="参考图">` : `<div class="sb-fg-ref-miss">图已删除</div>`;
+            return `<div class="sb-fg-ref-cell">
+                <div class="sb-fg-ref-idx">@图${i + 1}</div>
+                <div class="sb-fg-ref-thumb">${thumb}</div>
+                <div class="sb-fg-ref-acts"><button class="btn-ghost btn-tiny" title="移除这张参考图（@图序号会自动顺延）" onclick="StoryboardModule._sgRemoveRef(${mid})">✕ 移除</button></div>
+            </div>`;
+        }).join('');
+        const addBtn = `<div class="sb-fg-ref-add">
+            <button class="btn-ghost btn-tiny" onclick="StoryboardModule._sgAddRef()">＋ 添加参考图（选已生成图/切分图）</button>
+        </div>`;
+        return `<div class="sb-fg-ref-grid">${cells || '<div class="form-hint">未选参考图，可点下方「添加参考图」选择</div>'}</div>${addBtn}`;
+    },
+
+    // 移除清单里的某张参考图
+    _sgRemoveRef(mid) {
+        const ctx = this._sgCtx; if (!ctx) return;
+        mid = parseInt(mid);
+        ctx.refs = (ctx.refs || []).filter(x => x !== mid);
+        const host = document.getElementById('singleGenRefList');
+        if (host) host.innerHTML = this._renderSingleGenRefs();
+    },
+
+    // 「添加参考图」：打开统一图选弹窗（多选，已在清单里的默认勾选），确定后并回清单（保留提示语）。
+    _sgAddRef() {
+        const ctx = this._sgCtx; if (!ctx) return;
+        // 先把当前提示语暂存，避免切弹窗后丢失
+        const ta = document.getElementById('singleGenPrompt');
+        if (ta) ctx.prompt = ta.value;
+        const all = this._allImageAssets();
+        if (!all.length) { App.showToast('暂无可选图像，请先在人物/道具/场景页生成图，或生成四宫格切分图', 'info'); return; }
+        const blocks = this._groupAssetsBySb(all);
+        const chosen = new Set((ctx.refs || []).map(String));
+        const sections = this._renderPickBlocks(blocks, 'multi', chosen);
+        const mc = document.getElementById('modalContent');
+        mc.innerHTML = `
+            <div class="modal-header"><h2 class="modal-title">🖼️ 选择参考图（可多选，按勾选顺序作为 @图N）</h2><button class="modal-close" onclick="StoryboardModule.openSingleGenModal('${ctx.gid}')">×</button></div>
+            <div class="modal-body sb-pick-body">
+                <p class="form-hint">勾选要作为本单分镜参考的图。分镜图每行：四宫格 + 它的 4 张切分图。</p>
+                ${sections}
+            </div>
+            <div class="modal-footer">
+                <span class="rp-sel-count" id="pickSelCount" style="margin-right:auto;font-size:0.8rem;color:var(--t2)">已选 0 张</span>
+                <button class="btn-secondary" onclick="StoryboardModule.openSingleGenModal('${ctx.gid}')">返回</button>
+                <button class="btn-primary" onclick="StoryboardModule._sgConfirmAddRefs()">确定</button>
+            </div>`;
+        document.getElementById('modalOverlay').classList.add('active');
+        this._updatePickCount();
+    },
+
+    // 图选弹窗「确定」：把勾选结果按顺序并回清单，再回到生成弹窗
+    _sgConfirmAddRefs() {
+        const ctx = this._sgCtx; if (!ctx) return;
+        const cells = document.querySelectorAll('#modalContent .sb-pick-cell input[type=checkbox]:checked');
+        const ids = Array.from(cells).map(c => parseInt(c.value)).filter(v => !isNaN(v));
+        ctx.refs = Array.from(new Set(ids));
+        // 回到生成弹窗（会用 ctx.refs 渲染清单；提示语用暂存 ctx.prompt 或库里 g.prompt）
+        this.openSingleGenModal(ctx.gid);
+        // openSingleGenModal 会重置 ctx.refs 为库里值，故这里需把刚选的写回并重渲染
+        this._sgCtx.refs = ctx.refs;
+        if (ctx.prompt != null) {
+            const ta = document.getElementById('singleGenPrompt');
+            if (ta) ta.value = ctx.prompt;
+        }
+        const host = document.getElementById('singleGenRefList');
+        if (host) host.innerHTML = this._renderSingleGenRefs();
+    },
+
+    // 弹窗「开始生成」：保存画面提示语（独立字段 g.imgPrompt，不覆盖 local 提示语 g.prompt）+ 清单参考图，关弹窗后调用生成。
+    async _doSingleGen(gid) {
+        const p = Storage.getProject(this.projectId);
+        const g = (p.storyboardGroups || []).find(x => x.id === gid);
+        if (!g) return;
+        const ta = document.getElementById('singleGenPrompt');
+        const prompt = ta ? ta.value.trim() : (g.imgPrompt || '');
+        if (!prompt) { App.showToast('请先填写画面提示语', 'error'); return; }
+        const ctx = this._sgCtx || { refs: [] };
+        g.imgPrompt = prompt;
+        g.refImageIds = (ctx.refs || []).slice();
+        Storage.updateProject(this.projectId, { storyboardGroups: p.storyboardGroups });
+        App.closeModal();
+        await this.genSingleImage(gid);
+    },
+
+    // ===== 单分镜「替换」：从历史/素材库选一张图，直接设为当前画面（不调模型）=====
+    replaceSingleImage(gid) {
+        const p = Storage.getProject(this.projectId);
+        const g = (p.storyboardGroups || []).find(x => x.id === gid);
+        if (!g) return;
+        const all = this._allImageAssets();
+        if (!all.length) { App.showToast('暂无可选图像，请先在人物/道具/场景页生成图，或生成四宫格', 'info'); return; }
+        const blocks = this._groupAssetsBySb(all);
+        const chosen = g.imageId != null ? new Set([String(g.imageId)]) : null;
+        this._rsCtx = { gid };
+        const sections = this._renderPickBlocks(blocks, 'single', chosen, 'StoryboardModule._doReplaceSingleSel');
+        const mc = document.getElementById('modalContent');
+        mc.innerHTML = `
+            <div class="modal-header"><h2 class="modal-title">🔄 替换单分镜画面</h2><button class="modal-close" onclick="App.closeModal()">×</button></div>
+            <div class="modal-body sb-pick-body">
+                <p class="form-hint">点击任意一张图，即可把它设为本单分镜的当前画面。带高亮的是当前正在用的图。</p>
+                ${sections}
+            </div>
+            <div class="modal-footer">
+                <button class="btn-secondary" onclick="App.closeModal()">取消</button>
+            </div>`;
+        document.getElementById('modalOverlay').classList.add('active');
+    },
+    _doReplaceSingleSel(mediaId) {
+        const ctx = this._rsCtx || {};
+        if (ctx.gid == null) return;
+        const src = Storage.getMediaById(this.projectId, mediaId);
+        if (!src) { App.showToast('图像不存在', 'error'); return; }
+        const p = Storage.getProject(this.projectId);
+        const g = (p.storyboardGroups || []).find(x => x.id === ctx.gid);
+        if (!g) return;
+        g.imageId = parseInt(mediaId);
+        g.imageError = '';
+        Storage.updateProject(this.projectId, { storyboardGroups: p.storyboardGroups });
+        App.closeModal();
+        App.showToast('已替换单分镜画面', 'success');
+        this.render(this.projectId);
+    },
+
     // ===== 单分镜：生成单图（走四宫格同一编辑接口，参考图=选中的所有参考图）=====
     async genSingleImage(gid) {
         const p = Storage.getProject(this.projectId);
         const g = (p.storyboardGroups || []).find(x => x.id === gid);
         if (!g) return;
-        if (!(g.prompt || '').trim()) { App.showToast('请先填写画面提示词', 'error'); return; }
+        // 生图用「画面提示语」g.imgPrompt（独立于 local 提示语 g.prompt）；未填则用拼了 local 内容的默认文案
+        const imgPrompt = (g.imgPrompt && g.imgPrompt.trim()) ? g.imgPrompt.trim() : this._defaultImgPrompt(g);
+        if (!imgPrompt) { App.showToast('请先填写画面提示语', 'error'); return; }
 
         // 收集参考图 b64
         const refB64 = [];
@@ -893,7 +1111,7 @@ const StoryboardModule = {
 
         try {
             const submit = await API.post('/api/storyboard/fourgrid', {
-                prompt: g.prompt,
+                prompt: imgPrompt,
                 ref_images: refB64,
                 api_url: activeGroup.url,
                 api_key: activeGroup.apiKey,
@@ -1204,33 +1422,48 @@ const StoryboardModule = {
         this.render(this.projectId);
     },
 
-    // ===== 单分镜配音弹窗：改台词/语气，听参考音色，生成配音 =====
+    // ===== 单分镜配音弹窗：选说话人（自动匹配音色）、改台词/语气，生成配音 =====
     openSingleAudioModal(gid) {
         const p = Storage.getProject(this.projectId);
         const g = (p.storyboardGroups || []).find(x => x.id === gid);
         if (!g) return;
         const d = g.dialogue || {};
-        const refAud = g.refAudioId != null ? Storage.getMediaById(this.projectId, g.refAudioId) : null;
-        const refUrl = refAud ? Storage.mediaUrl(refAud.data) : '';
+        // 与四宫格一致：按说话人自动匹配其「当前选中音色」
+        const char = (p.characters || []).find(c => c.name === d.character);
+        const refAudio = char ? Storage.getSelectedMedia(this.projectId, 'characters', char, 'audio') : null;
+        const refUrl = refAudio ? Storage.mediaUrl(refAudio.data) : '';
         const curAud = g.audioId != null ? Storage.getMediaById(this.projectId, g.audioId) : null;
         const curUrl = curAud ? Storage.mediaUrl(curAud.data) : '';
+        const charOptions = (p.characters || []).map(c => `<option value="${this.esc(c.name)}" ${c.name === d.character ? 'selected' : ''}>${this.esc(c.name)}</option>`).join('');
 
         const mc = document.getElementById('modalContent');
         mc.innerHTML = `
             <div class="modal-header"><h2 class="modal-title">🔊 单分镜配音</h2><button class="modal-close" onclick="App.closeModal()">×</button></div>
             <div class="modal-body">
-                <div class="form-group">
-                    <label class="form-label">语气 / 风格</label>
-                    <input class="form-input" id="ssTone" value="${this.esc(d.tone || '')}" placeholder="例如：低沉、温柔、激动">
+                <div class="form-row">
+                    <div class="form-col">
+                        <label class="form-label">说话人</label>
+                        <select class="form-input" id="ssChar" onchange="StoryboardModule.openSingleAudioModal('${gid}')">
+                            <option value="">— 不指定 —</option>
+                            ${charOptions}
+                        </select>
+                    </div>
+                    <div class="form-col">
+                        <label class="form-label">语气 / 风格</label>
+                        <input class="form-input" id="ssTone" value="${this.esc(d.tone || '')}" placeholder="例如：低沉、温柔、激动">
+                    </div>
                 </div>
                 <div class="form-group">
                     <label class="form-label">台词文本</label>
                     <textarea class="form-textarea" id="ssText" style="min-height:72px" placeholder="本分镜要说的话">${this.esc(d.text || '')}</textarea>
                 </div>
                 <div class="sb-audio-ref">
-                    <span class="sb-audio-ref-label">参考音色</span>
-                    ${refUrl ? `<audio controls preload="none" src="${refUrl}"></audio>` : '<span class="sb-audio-ref-miss">尚未选择参考音色</span>'}
-                    <button class="btn-ghost btn-tiny" onclick="StoryboardModule.pickRefAudio('${gid}')">选参考音色</button>
+                    <span class="sb-audio-ref-label">参考音色 ${char ? `· ${this.esc(char.name)}` : ''}</span>
+                    ${refUrl
+                        ? `<audio controls preload="none" src="${refUrl}"></audio>`
+                        : (char
+                            ? `<span class="sb-audio-ref-miss">⚠️ 该人物尚无音色，请先到人物页生成音频</span>`
+                            : `<span class="sb-audio-ref-miss">请先选择说话人</span>`)}
                 </div>
                 ${this._emotionPanelHtml('ss')}
                 ${curUrl ? `<div class="sb-audio-ref"><span class="sb-audio-ref-label">当前配音</span><audio controls preload="none" src="${curUrl}"></audio>${App.audioDragHandle(curUrl, `分镜配音_${gid}.${((curAud && curAud.mime) || '').includes('mpeg') ? 'mp3' : ((curAud && curAud.mime) || '').includes('flac') ? 'flac' : 'wav'}`, '拖出')}</div>` : ''}
@@ -1247,26 +1480,30 @@ const StoryboardModule = {
         const p = Storage.getProject(this.projectId);
         const g = (p.storyboardGroups || []).find(x => x.id === gid);
         if (!g) return;
-        const text = (document.getElementById('ssText') || {}).value || '';
-        const tone = (document.getElementById('ssTone') || {}).value || '';
-        if (!text.trim()) { App.showToast('请先填写台词', 'error'); return; }
-        // 回写台词/语气
-        g.dialogue = Object.assign({}, g.dialogue, { text: text.trim(), tone: tone.trim() });
-        Storage.updateProject(this.projectId, { storyboardGroups: p.storyboardGroups });
+const text = (document.getElementById('ssText') || {}).value || '';
+const tone = (document.getElementById('ssTone') || {}).value || '';
+const charName = (document.getElementById('ssChar') || {}).value || '';
+if (!text.trim()) { App.showToast('请先填写台词', 'error'); return; }
+// 回写说话人/台词/语气
+g.dialogue = Object.assign({}, g.dialogue, { character: charName, text: text.trim(), tone: tone.trim() });
+Storage.updateProject(this.projectId, { storyboardGroups: p.storyboardGroups });
 
-        const refAud = g.refAudioId != null ? Storage.getMediaById(this.projectId, g.refAudioId) : null;
-        if (!refAud) { App.showToast('请先选择参考音色', 'error'); return; }
-        const refB64 = await this._urlToB64(Storage.mediaUrl(refAud.data));
-        if (!refB64) { App.showToast('参考音色加载失败', 'error'); return; }
+// 与四宫格一致：按说话人自动匹配其「当前选中音色」
+const char = (p.characters || []).find(c => c.name === charName);
+if (!char) { App.showToast('请选择说话人', 'error'); return; }
+const refAud = Storage.getSelectedMedia(this.projectId, 'characters', char, 'audio');
+if (!refAud) { App.showToast(`「${char.name}」尚未生成音色，请先到人物页生成`, 'error'); return; }
+const refB64 = await this._urlToB64(Storage.mediaUrl(refAud.data));
+if (!refB64) { App.showToast('参考音色加载失败', 'error'); return; }
 
-        const btn = document.getElementById('ssGenBtn');
-        if (btn) { btn.disabled = true; btn.textContent = '⏳ 生成中…'; }
-        const res = document.getElementById('ssResult');
-        if (res) res.innerHTML = '<span class="sb-dim-hint">⏳ 正在克隆音色生成配音…</span>';
-        this._polls['si_aud_' + gid] = true;
-        this.render(this.projectId);
-        // 重新打开弹窗（render 会刷新底层列表，但弹窗内容还在）
-        try {
+const btn = document.getElementById('ssGenBtn');
+if (btn) { btn.disabled = true; btn.textContent = '⏳ 生成中…'; }
+const res = document.getElementById('ssResult');
+if (res) res.innerHTML = '<span class="sb-dim-hint">⏳ 正在克隆音色生成配音…</span>';
+this._polls['si_aud_' + gid] = true;
+this.render(this.projectId);
+// 重新打开弹窗（render 会刷新底层列表，但弹窗内容还在）
+try {
 const submit = await API.post('/api/storyboard/tts_clone', {
 ref_audio_b64: refB64, ref_audio_mime: refAud.mime || 'audio/wav',
 text: text.trim(), ref_text: tone.trim(),
@@ -1424,6 +1661,58 @@ emotions: this._collectEmotions(),
         g.dialogues[i] = d;
         Storage.updateProject(this.projectId, { storyboardGroups: p.storyboardGroups });
         this.render(this.projectId);
+    },
+
+    // 单分镜版「说话人下拉」：与 _panelCharSelect 同款，选人物→自动匹配其音色；缺音色给⚠️提示。
+    // 单分镜的台词归属在 g.dialogue（对象，非数组），故单独一个方法。
+    _singleCharSelect(g, cur) {
+        const p = Storage.getProject(this.projectId);
+        const chars = p.characters || [];
+        const curChar = chars.find(c => c.name === cur);
+        const hasVoice = curChar ? !!Storage.getSelectedMedia(this.projectId, 'characters', curChar, 'audio') : false;
+        const opts = ['<option value="">— 选择人物 —</option>']
+            .concat(chars.map(c => {
+                const v = !!Storage.getSelectedMedia(this.projectId, 'characters', c, 'audio');
+                return `<option value="${this.esc(c.name)}" ${c.name === cur ? 'selected' : ''}>${this.esc(c.name)}${v ? ' 🔊' : ''}</option>`;
+            }))
+            .join('');
+        const warn = (cur && !hasVoice) ? '<span class="sb-dlg-novoice" title="该人物尚无音色，请先到人物页生成音频">⚠️</span>' : '';
+        return `<div class="sb-dlg-who-wrap">
+            <select class="sb-dlg-who-select ${cur ? '' : 'is-empty'}" onchange="StoryboardModule.setSingleCharacter('${g.id}',this.value)">${opts}</select>
+            ${warn}
+        </div>`;
+    },
+
+    // 单分镜下拉选说话人 → 写回 g.dialogue.character（配音时按此名字自动匹配人物音色）
+    setSingleCharacter(gid, name) {
+        const p = Storage.getProject(this.projectId);
+        const g = (p.storyboardGroups || []).find(x => x.id === gid);
+        if (!g) return;
+        if (!g.dialogue) g.dialogue = { character: '', text: '', tone: '' };
+        g.dialogue.character = name || '';
+        Storage.updateProject(this.projectId, { storyboardGroups: p.storyboardGroups });
+        this.render(this.projectId);
+    },
+
+    // 单分镜「▶ 播放 / ⏸」：播放本单分镜的成品配音（与其它行内播放互斥）
+    toggleSinglePlay(gid) {
+        const a = document.getElementById('siAaudio_' + gid);
+        const b = document.getElementById('siAplay_' + gid);
+        if (!a) return;
+        a.onended = () => { if (b) b.textContent = '▶ 播放'; this._curRowAudio = null; };
+        if (a.paused) {
+            if (this._curRowAudio && this._curRowAudio !== a) {
+                this._curRowAudio.pause();
+                const prev = this._curRowAudio._btn;
+                if (prev) prev.textContent = '▶ 播放';
+            }
+            a.play(); a._btn = b; this._curRowAudio = a;
+            if (b) b.textContent = '⏸ 暂停';
+        } else {
+            a.pause();
+            if (b) b.textContent = '▶ 播放';
+            this._curRowAudio = null;
+        }
     },
 
     // 行内「▶ 播放 / ⏸」：播放该 panel 当前配音音频（与其它行内播放互斥）

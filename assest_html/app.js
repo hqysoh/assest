@@ -316,10 +316,10 @@ const InlineEdit = {
         const el = e.target.closest('.inline-edit');
         if (!el || el.dataset.editReady === '1') return;
         // 记录原始值，并把占位文本去掉以便编辑
-        el.dataset.original = el.textContent;
+        el.dataset.original = this._readText(el);
         if (el.classList.contains('is-empty')) {
             el.classList.remove('is-empty');
-            if (el.textContent === (el.dataset.placeholder || '—')) el.textContent = '';
+            if (this._readText(el) === (el.dataset.placeholder || '—')) el.textContent = '';
         }
         el.dataset.editReady = '1';
         el.classList.add('editing');
@@ -330,7 +330,7 @@ const InlineEdit = {
         if (!el || el.dataset.editReady !== '1') return;
         delete el.dataset.editReady;
         el.classList.remove('editing');
-        const newVal = (el.textContent || '').replace(/\u00a0/g, ' ').trim();
+        const newVal = this._readText(el).replace(/\u00a0/g, ' ').trim();
         const oldVal = (el.dataset.original || '').trim();
         // 单行字段去掉换行
         const single = el.dataset.single === '1';
@@ -369,6 +369,8 @@ const InlineEdit = {
         const action = el.dataset.edit;
         const pid = App.currentProjectId;
         if (!pid) return false;
+        // 兜底：清掉可能残留/历史污染的「✓ 已保存」角标文字，避免写进提示语等字段
+        val = String(val == null ? '' : val).replace(/\u2713?\s*已保存/g, '').trim();
         try {
             if (action === 'char') {
                 Storage.updateCharacter(pid, el.dataset.id, { [el.dataset.field]: val });
@@ -427,17 +429,27 @@ const InlineEdit = {
     },
 
     // 在元素右上角短暂显示 ✓ 已保存
+    // 角标 append 在可编辑元素内部，但标记 contenteditable=false 且读取内容时会被剔除，避免「✓ 已保存」混进提示语文本。
     _flashSaved(el) {
         let tag = el.querySelector('.inline-edit-saved');
         if (!tag) {
             tag = document.createElement('span');
             tag.className = 'inline-edit-saved';
+            tag.setAttribute('contenteditable', 'false');   // 不参与可编辑内容
             tag.textContent = '✓ 已保存';
             el.appendChild(tag);
         }
         tag.classList.add('show');
         clearTimeout(tag._t);
         tag._t = setTimeout(() => { tag.classList.remove('show'); }, 1200);
+    },
+
+    // 读取可编辑元素的「纯文本」：克隆后剔除「✓ 已保存」角标等非内容节点，避免角标文字混入。
+    _readText(el) {
+        if (!el) return '';
+        const clone = el.cloneNode(true);
+        clone.querySelectorAll('.inline-edit-saved').forEach(n => n.remove());
+        return clone.textContent || '';
     },
 
     // 生成器：根据值/占位返回 HTML（统一处理空值视觉）

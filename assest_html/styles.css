@@ -133,6 +133,9 @@ body::before{content:'';position:fixed;inset:0;background:
 .list-row-img:hover img{transform:scale(1.05)}
 .placeholder-lg{font-size:3rem;color:var(--t3);opacity:.35}
 .list-img-btns{display:flex;gap:0.25rem;align-items:center;flex-wrap:wrap;justify-content:center}
+/* 单分镜图像按钮（生成/上传/替换/历史）：2x2 紧凑网格，按内容收紧不撑宽 */
+.sb-single-img-btns{display:grid;grid-template-columns:auto auto;gap:0.25rem;width:max-content;margin:0 auto;justify-content:center}
+.sb-single-img-btns .btn-tiny{justify-content:center;white-space:nowrap;padding:0.2rem 0.4rem}
 
 .list-row-header-spacer{flex:1}
 .list-row-top-right{position:absolute;top:0.7rem;right:0.7rem;display:flex;gap:0.3rem}
@@ -521,6 +524,7 @@ input[type="checkbox"]{accent-color:var(--ac)}
 .sb-refimg-x{position:absolute;top:1px;right:2px;color:#fff;font-weight:700;font-size:0.8rem;text-shadow:0 0 3px #000;pointer-events:none}
 .sb-refimg-thumb:hover{border-color:var(--err)}
 .sb-single-audio-row{display:flex;align-items:center;gap:0.5rem;margin-top:0.35rem;flex-wrap:wrap}
+.sb-single-speaker{font-weight:600;color:var(--t1)}
 .sb-dim-hint{font-size:0.7rem;color:var(--t2)}
 /* 单分镜：台词 + 情绪同一行（情绪在右侧） */
 .sb-single-line-row{display:flex;align-items:flex-start;gap:0.6rem}
@@ -1547,3 +1551,6 @@ padding:1px 3px;background:rgba(0,0,0,0.6);color:#fff;text-align:center;white-sp
 .sb-inline-single-tag{font-size:0.66rem;color:var(--ac);font-weight:600;padding:0.1rem 0.4rem;opacity:0.85}
 .sb-inline-single .sb-single-row{border-left:none;margin:0;background:transparent;box-shadow:none}
 .sb-inline-single .list-row{background:transparent}
+.sb-inline-single-add{padding:0.1rem 0 0.3rem 0.4rem}
+.sb-inline-single-add .btn-tiny{opacity:0.8}
+.sb-inline-single-add .btn-tiny:hover{opacity:1}
