@@ -4067,23 +4067,32 @@ emotions: this._collectEmotions(),
                 });
                 return;
             }
-            // 四宫格：逐面板，按 panel 勾选纳入；勾选但无切分图 → 跳过并计数
+            // 四宫格：逐面板，按 panel 勾选纳入；勾选但无切分图 → 跳过并计数。
+            // 本组 4 张图共享同一个 local prompt（分镜统一提示词 g.globalPrompt），
+            // 不再各格用各自的 localPrompts[i]；台词/配音只挂在本组纳入时间轴的「第一段」上，
+            // 其余格不重复配音（避免同一句台词被读 4 遍）。
             const dlg = g.dialogues || [];
+            const sharedPrompt = (g.globalPrompt || '').trim();
+            let groupFirstDone = false;   // 本组是否已放置过「带台词的第一段」
             for (let i = 0; i < 4; i++) {
                 if (g.panelSelected && g.panelSelected[i] === false) continue;  // 未勾选
                 const imgId = (g.panelImages || [])[i];
                 if (imgId == null) { skipNoImg++; continue; }                   // 勾选但无图
-                const audId = (g.panelAudios || [])[i];
                 if (!firstMeta) firstMeta = g;
+                const isGroupFirst = !groupFirstDone;   // 本组第一段（物理 panel 不一定是 0，按实际纳入顺序）
+                groupFirstDone = true;
                 segments.push({
                     uid: Storage._uid(),
                     groupId: g.id, panel: i,
-                    imageId: imgId, audioId: audId,
-                    prompt: (g.localPrompts || [])[i] || g.globalPrompt || '',
+                    imageId: imgId,
+                    // 配音只第一段带：取本组「第一格当前选中音频」，后续格不配音
+                    audioId: isGroupFirst ? (g.panelAudios || [])[i] : null,
+                    prompt: sharedPrompt,   // 4 格共享同一 local prompt
                     length: 90, trimStart: 0,
                     transition: g.transition || 'cut',
                     shotTransition: (g.shotTransitions || [])[i] || '',
-                    dialogue: dlg[i] || {},
+                    // 台词只第一段带，其余格清空，避免重复字幕/配音
+                    dialogue: isGroupFirst ? (dlg[i] || {}) : {},
                 });
             }
         });
@@ -5371,6 +5380,10 @@ this._tl.workflow = wf;
                 start: c.start, length: segLen,
                 transition: tText,
                 transition_dur: tText ? (Number(c.transitionDur) || 0.5) : 0,
+                // 分组标识：乱神（Singularity）工作流据此把同一四宫格组的多张图聚合成「一段多图（多帧）」；
+                // 其他工作流（director/yusu）不读这两个字段，仍逐段一图，互不影响。
+                group_id: c.groupId != null ? String(c.groupId) : '',
+                panel: (c.panel != null ? c.panel : 0),
             });
         }
         // 至少要有一个带图的段（编辑接口/合成需要画面）

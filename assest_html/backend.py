@@ -1377,61 +1377,86 @@ def run_director_singularity_sync(params, task_id=None):
     if not img_segs:
         return {'success': False, 'error': '缺少图像段'}
 
+    # === 先按 group_id 把「连续的同组图像段」聚合成块（block）===
+    # 乱神 easy timelineEditor 的一个 maintain 段支持挂多张图（content.images 数组，即「多帧」）：
+    # 同一四宫格组（前端传来的 group_id 相同）的多张图，合并到「一个段」里，按段长均分 start/end_frame，
+    # 让模型把它们当成这一镜的连续关键帧来插帧（一个 local prompt 配多图），而不是拆成多段。
+    # 无 group_id 或单图段则各自成块，行为与原来逐段一致。转场跟随「块」的最后一段。
+    blocks = []  # 每个元素: {segs:[seg,...]}（同组连续多段）
+    for seg in img_segs:
+        # 跳过空段（无图无词）
+        if not seg.get('image_b64') and not (seg.get('prompt', '') or '').strip():
+            continue
+        gid = str(seg.get('group_id') or '').strip()
+        if blocks and gid and str(blocks[-1].get('group_id') or '') == gid:
+            blocks[-1]['segs'].append(seg)
+        else:
+            blocks.append({'group_id': gid, 'segs': [seg]})
+
     # 组装 easy timelineEditor 的 maintain 轨道（按 cursor 顺序紧贴排布，含转场段）
     main_segments = []
     cursor = 0
     uploaded_names = []   # 本次上传到 input 的临时图，结束后清理
-    for i, seg in enumerate(img_segs):
-        length = max(1, int(seg.get('length', 90)))
-        # 空段跳过：既没有图也没有提示词的段不发给 ComfyUI，
-        # 否则时间轴上会出现「缺 prompt 的 segment」→ LTXDirector 报错
-        # "There is a segment on the timeline missing a prompt!"
-        if not seg.get('image_b64') and not (seg.get('prompt', '') or '').strip():
-            continue
-        img_name = ''
-        if seg.get('image_b64'):
-            try:
-                raw = base64.b64decode(seg['image_b64'])
-                img_name = comfy_upload_file(raw, f"sbimg_{int(time.time()*1000)}_{i}.png")
-                uploaded_names.append(img_name)
-            except Exception as e:
-                comfy_cleanup_input_files(uploaded_names)
-                return {'success': False, 'error': f'第{i+1}个图像段上传失败: {e}'}
-        # 关键：图已上传到 ComfyUI input 目录，直接用 source_type="input" + file_path 本地读取，
-        # 不要用 url（easy timelineEditor 的 load_image_tensor 解析 url 会走 urllib，
-        # 受本机代理影响访问 127.0.0.1:8188 失败 → 图丢失 → PromptRelay 回退 704x480）。
-        # 统一在每段 prompt 末尾追加「无字幕」，避免模型把对白/解说文字当字幕烧进画面
-        # （尤其带「XX说：…」对白的段，否则文字易被渲染成弹出字幕；已含则不重复）。
-        seg_text = (seg.get('prompt', '') or '').strip()
+    for bi, block in enumerate(blocks):
+        segs = block['segs']
+        # 块时长 = 块内各段时长之和；块的 local prompt 取块内第一段（同组已共享同一 prompt）
+        block_len = sum(max(1, int(s.get('length', 90))) for s in segs)
+        first_seg = segs[0]
+        seg_text = (first_seg.get('prompt', '') or '').strip()
         if seg_text and '无字幕' not in seg_text:
             seg_text = seg_text + '，无字幕'
+
+        # 上传块内每张图，按「在块内的累计帧位」均分 start/end_frame（多帧关键帧）
+        images = []
+        acc = 0
+        for k, s in enumerate(segs):
+            s_len = max(1, int(s.get('length', 90)))
+            if s.get('image_b64'):
+                try:
+                    raw = base64.b64decode(s['image_b64'])
+                    img_name = comfy_upload_file(raw, f"sbimg_{int(time.time()*1000)}_{bi}_{k}.png")
+                    uploaded_names.append(img_name)
+                except Exception as e:
+                    comfy_cleanup_input_files(uploaded_names)
+                    return {'success': False, 'error': f'第{bi+1}块第{k+1}张图像上传失败: {e}'}
+                # 关键：图已上传到 ComfyUI input 目录，用 source_type="input" + file_path 本地读取，
+                # 不要用 url（easy timelineEditor 的 load_image_tensor 解析 url 会走 urllib，
+                # 受本机代理影响访问 127.0.0.1:8188 失败 → 图丢失 → PromptRelay 回退 704x480）。
+                # 单图块 → 整段一张图（start=0,end=块长）；多图块 → 每张图均分块时长，做多帧关键帧。
+                if len(segs) > 1:
+                    images.append({
+                        'source_type': 'input', 'file_path': img_name, 'file_name': img_name,
+                        'start_frame': acc, 'end_frame': acc + s_len,
+                    })
+                else:
+                    images.append({
+                        'source_type': 'input', 'file_path': img_name, 'file_name': img_name,
+                        'start_frame': 0, 'end_frame': block_len,
+                    })
+            acc += s_len
+
         content = {
             'text': seg_text,
-            'images': ([{
-                'source_type': 'input',
-                'file_path': img_name,
-                'file_name': img_name,
-                'start_frame': 0,
-                'end_frame': length,
-            }] if img_name else []),
+            'images': images,
             'type': 'flf',
         }
         main_segments.append({
-            'id': f"seg{i}-{random.randint(100000,999999)}",
+            'id': f"seg{bi}-{random.randint(100000,999999)}",
             'start_frame': cursor,
-            'end_frame': cursor + length,
+            'end_frame': cursor + block_len,
             'content': content,
             'color': 'var(--secondary)',
         })
-        cursor += length
+        cursor += block_len
 
-        # 相邻段之间插入转场段（无图、纯文本），最后一段不插
-        trans_text = str(seg.get('transition', '') or '').strip()
-        trans_frames = int(round(float(seg.get('transition_dur', 0) or 0) * fps))
-        if i < len(img_segs) - 1 and trans_text and trans_frames > 0:
+        # 相邻块之间插入转场段（无图、纯文本），最后一块不插。转场取块内最后一段的转场设置。
+        last_seg = segs[-1]
+        trans_text = str(last_seg.get('transition', '') or '').strip()
+        trans_frames = int(round(float(last_seg.get('transition_dur', 0) or 0) * fps))
+        if bi < len(blocks) - 1 and trans_text and trans_frames > 0:
             trans_prompt = trans_text if '无字幕' in trans_text else (trans_text + '，无字幕')
             main_segments.append({
-                'id': f"trans{i}-{random.randint(100000,999999)}",
+                'id': f"trans{bi}-{random.randint(100000,999999)}",
                 'start_frame': cursor,
                 'end_frame': cursor + trans_frames,
                 'content': {'text': trans_prompt, 'images': [], 'type': 'flf'},
