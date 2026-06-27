@@ -956,6 +956,8 @@ const StoryboardModule = {
             origin: cur,
             desc,
             gid,
+            neighborGid: gid,            // 面板扩展也展示前后衔接图（图1上一末/图2当前关键帧/图3下一首）
+            neighborPanel: i,            // 当前关键帧取本组第 i 格切分图
             rewriteCall: `StoryboardModule.aiRewriteQuadLines('panel','${gid}',${i})`,
             confirmCall: `StoryboardModule.confirmPanelExpandQuad('${gid}',${i})`,
         });
@@ -1018,22 +1020,31 @@ const StoryboardModule = {
                 quadPrompt += '\n\n参考图说明：\n' + ctx.refDesc.trim();
             }
 
-            // 2) 参考图：弹窗选中的参考图（若有）优先；否则本面板当前图 + 本组四宫格大图；至少一张
+            // 2) 收集参考图，严格按「图1=上一分镜末、图2=本面板图(当前关键帧)、图3=下一分镜首」的顺序发送，
+            //    与 QUAD_INSTR_DEFAULT 指令里的「图1/图2/图3」语义对齐。
             const refB64 = [];
+            const { prevUrl, nextUrl } = this._neighborEdgeImages(p, gid);
+            // 图2·当前关键帧：本面板第 i 格切分图，没有则退用本组四宫格大图
+            let curUrl = '';
+            const panelMid = (g.panelImages || [])[i];
+            if (panelMid != null) { const pm = Storage.getMediaById(this.projectId, panelMid); if (pm) curUrl = Storage.mediaUrl(pm.data); }
+            if (!curUrl && g.fourGridImageId != null) { const fg = Storage.getMediaById(this.projectId, g.fourGridImageId); if (fg) curUrl = Storage.mediaUrl(fg.data); }
+            // 图1（上一末）→ 图2（本面板）→ 图3（下一首）
+            for (const u of [prevUrl, curUrl, nextUrl]) {
+                if (!u) continue;
+                const b = await this._urlToB64(u);
+                if (b) refB64.push(b);
+            }
+            // 用户在弹窗里额外多选的参考图，追加到末尾作为补充参考
             if (Array.isArray(presetRefIds) && presetRefIds.length) {
+                const baseUrls = new Set([prevUrl, curUrl, nextUrl].filter(Boolean));
                 for (const mid of presetRefIds) {
                     const m = Storage.getMediaById(this.projectId, mid);
                     if (!m) continue;
-                    const b = await this._urlToB64(Storage.mediaUrl(m.data));
+                    const url = Storage.mediaUrl(m.data);
+                    if (baseUrls.has(url)) continue;   // 与三张衔接图重复的跳过
+                    const b = await this._urlToB64(url);
                     if (b) refB64.push(b);
-                }
-            } else {
-                const panelMid = (g.panelImages || [])[i];
-                const panelImg = panelMid != null ? Storage.getMediaById(this.projectId, panelMid) : null;
-                if (panelImg) { const b = await this._urlToB64(Storage.mediaUrl(panelImg.data)); if (b) refB64.push(b); }
-                if (!refB64.length && g.fourGridImageId != null) {
-                    const fg = Storage.getMediaById(this.projectId, g.fourGridImageId);
-                    if (fg) { const b = await this._urlToB64(Storage.mediaUrl(fg.data)); if (b) refB64.push(b); }
                 }
             }
             if (!refB64.length) {
@@ -1249,28 +1260,36 @@ const StoryboardModule = {
         </div>`;
         document.getElementById('modalOverlay').classList.add('active');
         this._renderExpandRefs();
-        if (opt.neighborGid) this._renderExpandNeighbors(opt.neighborGid);
+        if (opt.neighborGid) this._renderExpandNeighbors(opt.neighborGid, opt.neighborPanel);
     },
 
     // 在扩展弹窗内只读展示「前后衔接图」：上一分镜末图、下一分镜首图。
     // 这两张图不在「已选参考图」里，但生成四宫格时会自动随 ref_images 一起发给模型，
     // 此处展示是为了让用户清楚知道生图会带上它们做前后衔接（不可增删）。
-    _renderExpandNeighbors(gid) {
+    // panel 不为 null 时为「面板扩展」：当前关键帧（图2）取本组第 panel 格切分图；
+    // 否则为「单分镜扩展」：图2 取本分镜已选参考图第一张 / 本分镜当前图。
+    _renderExpandNeighbors(gid, panel) {
         const wrap = document.getElementById('expNeighborWrap');
         if (!wrap) return;
         const p = Storage.getProject(this.projectId);
         const g = (p.storyboardGroups || []).find(x => String(x.id) === String(gid));
         const { prevUrl, nextUrl } = this._neighborEdgeImages(p, gid);
-        // 当前分镜关键帧：优先本分镜已选参考图第一张，否则本分镜当前图（与生图时的图2取法一致）
+        // 当前分镜关键帧（图2）：与生图时的图2取法一致
         let curUrl = '';
-        const refIds0 = (g && g.refImageIds) || [];
-        if (refIds0.length) {
-            const m0 = Storage.getMediaById(this.projectId, refIds0[0]);
-            if (m0) curUrl = Storage.mediaUrl(m0.data);
-        }
-        if (!curUrl && g && g.imageId != null) {
-            const mi = Storage.getMediaById(this.projectId, g.imageId);
-            if (mi) curUrl = Storage.mediaUrl(mi.data);
+        if (panel != null && g) {
+            const pmid = (g.panelImages || [])[panel];
+            if (pmid != null) { const pm = Storage.getMediaById(this.projectId, pmid); if (pm) curUrl = Storage.mediaUrl(pm.data); }
+            if (!curUrl && g.fourGridImageId != null) { const fg = Storage.getMediaById(this.projectId, g.fourGridImageId); if (fg) curUrl = Storage.mediaUrl(fg.data); }
+        } else {
+            const refIds0 = (g && g.refImageIds) || [];
+            if (refIds0.length) {
+                const m0 = Storage.getMediaById(this.projectId, refIds0[0]);
+                if (m0) curUrl = Storage.mediaUrl(m0.data);
+            }
+            if (!curUrl && g && g.imageId != null) {
+                const mi = Storage.getMediaById(this.projectId, g.imageId);
+                if (mi) curUrl = Storage.mediaUrl(mi.data);
+            }
         }
         const cell = (url, label) => url
             ? `<div class="sb-exp-ref-cell" title="${label}（自动作为参考，不可移除）"><img src="${url}" loading="lazy"><span class="sb-exp-neighbor-tag">${label}</span></div>`
