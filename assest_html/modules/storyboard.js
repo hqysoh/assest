@@ -58,8 +58,9 @@ const StoryboardModule = {
                     ${genBtnHtml}
                     <button class="sb-compose-btn" onclick="StoryboardModule.openTimeline()" ${groups.length ? '' : 'disabled'} title="进入时间轴合成视频：将已勾选的分镜按图像/音频双轨对齐后生成成片"><span class="sb-compose-ic">🎞️</span><span>合成视频</span></button>
                     <button class="btn-secondary sb-jump-sel" onclick="StoryboardModule.jumpToFirstSelected()" ${groups.length ? '' : 'disabled'} title="滚动定位到第一个『已勾选合成视频』的分镜并高亮">🎯 定位首选</button>
-                    <button class="btn-secondary" onclick="StoryboardModule.importGroupsFromFile()" title="上传分镜 JSON（含 person / 分镜 字段，与智能生成的格式一致），也可直接把 .json 拖到下方区域">📥 上传 JSON</button>
-                    <input type="file" id="sbImportJson" accept="application/json,.json" style="display:none" onchange="StoryboardModule.onImportJsonFile(event)">
+<button class="btn-secondary" onclick="StoryboardModule.importGroupsFromFile()" title="上传分镜 JSON（含 person / 分镜 字段，与智能生成的格式一致），也可直接把 .json 拖到下方区域">📥 上传 JSON</button>
+<input type="file" id="sbImportJson" accept="application/json,.json" style="display:none" onchange="StoryboardModule.onImportJsonFile(event)">
+<button class="btn-secondary" onclick="StoryboardModule.openPasteJsonModal()" title="直接粘贴分镜 JSON 文本（含 person / 分镜 字段，与上传 JSON 同格式）解析导入，无需保存成文件">📋 粘贴 JSON</button>
                     <button class="btn-secondary" onclick="StoryboardModule.exportContextJson()" title="导出剧本 / 人物 / 道具 / 场景为 JSON，供另一台机器导入或生成分镜复用">📤 导出素材</button>
                     <button class="btn-secondary sb-mark-global" onclick="StoryboardModule.markAllSelectedGlobal()" ${groups.length ? '' : 'disabled'} title="把所有组中当前『已勾选合成』的分镜一键标记为已处理（置灰并取消勾选）">✅ 标记已选</button>
                     <button class="btn-secondary sb-unsel-all" onclick="StoryboardModule.unselectAllGlobal()" ${groups.length ? '' : 'disabled'} title="取消所有组中当前『已勾选合成』的分镜（不改变已标记状态）">☐ 全部取消</button>
@@ -2403,30 +2404,61 @@ emotions: this._collectEmotions(),
     },
 
     // 解析分镜 JSON 文本（与智能生成结果同构：含 person / 分镜 字段）并导入为分镜组。
-    // 解析失败 / 字段缺失都会给出明确提示。
+    // 解析失败 / 字段缺失都会给出明确提示。返回是否导入成功（供粘贴弹窗据此关闭）。
     _parseAndImportJson(text) {
         let data;
         try {
             data = JSON.parse(text);
         } catch (e) {
-            App.showToast('❌ JSON 解析失败：文件不是合法的 JSON', 'error');
-            return;
+            App.showToast('❌ JSON 解析失败：内容不是合法的 JSON', 'error');
+            return false;
         }
         // 兼容多种字段命名：分镜 / storyboards；person / persons / 人物
         const storyboards = data['分镜'] || data.storyboards || data.storyboard || null;
         const person = data.person || data.persons || data['人物'] || {};
         if (!storyboards || typeof storyboards !== 'object' || !Object.keys(storyboards).length) {
             App.showToast('⚠️ 未识别到分镜数据：JSON 需包含『分镜』（或 storyboards）字段', 'error');
-            return;
+            return false;
         }
         try {
             const stat = this._importGroups(person, storyboards) || {};
             App.showToast(`✅ 已导入：${stat.groupCount || 0} 组四宫格 · 共 ${stat.shots || 0} 个分镜`, 'success');
             if (this.projectId) this.render(this.projectId);
+            return true;
         } catch (e) {
             console.error(e);
             App.showToast('❌ 导入失败：' + (e.message || '分镜结构异常'), 'error');
+            return false;
         }
+    },
+
+    // 📋 粘贴 JSON：弹出一个文本框，直接粘贴分镜 JSON 文本解析导入（无需保存成文件）
+    openPasteJsonModal() {
+        const mc = document.getElementById('modalContent');
+        if (!mc) { App.showToast('❌ 无法打开弹窗', 'error'); return; }
+        mc.innerHTML = `
+            <div class="modal-header"><h2 class="modal-title">📋 粘贴分镜 JSON 导入</h2><button class="modal-close" onclick="App.closeModal()">×</button></div>
+            <div class="modal-body">
+                <div class="form-hint" style="margin-bottom:8px">把分镜 JSON 文本直接粘贴到下方（与「上传 JSON」同格式：需包含 <code>分镜</code>（或 <code>storyboards</code>）字段，可选 <code>person</code> / <code>人物</code>），点「解析导入」即可，无需保存成文件。</div>
+                <textarea id="sbPasteJsonInput" class="form-input" style="width:100%;min-height:280px;font-family:monospace;font-size:12px;line-height:1.5;white-space:pre;overflow:auto" placeholder='粘贴 JSON，例如：\n{\n  "person": { ... },\n  "分镜": {\n    "1": { ... },\n    "2": { ... }\n  }\n}'></textarea>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-secondary" onclick="App.closeModal()">取消</button>
+                <button class="btn-primary" onclick="StoryboardModule.confirmPasteJson()">解析导入</button>
+            </div>`;
+        document.getElementById('modalOverlay').classList.add('active');
+        // 自动聚焦文本框，方便直接粘贴
+        setTimeout(() => { const ta = document.getElementById('sbPasteJsonInput'); if (ta) ta.focus(); }, 50);
+    },
+
+    // 粘贴 JSON 弹窗：点「解析导入」后取文本框内容，复用 _parseAndImportJson 解析。
+    // 解析成功后关闭弹窗；失败则保留弹窗便于用户修正后重试。
+    confirmPasteJson() {
+        const ta = document.getElementById('sbPasteJsonInput');
+        const text = ta ? (ta.value || '').trim() : '';
+        if (!text) { App.showToast('⚠️ 请先粘贴 JSON 文本', 'error'); return; }
+        // _parseAndImportJson 内部已处理解析失败/字段缺失的 toast 提示，并返回是否成功
+        if (this._parseAndImportJson(text)) App.closeModal();
     },
 
     // 📤 导出剧本 / 人物 / 道具 / 场景为 JSON 文件，供另一台机器导入或 CC 生成分镜时复用
