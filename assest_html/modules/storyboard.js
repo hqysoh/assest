@@ -1224,16 +1224,16 @@ const StoryboardModule = {
                 <label class="form-label">原提示词</label>
                 <div class="sb-exp-origin">${this.esc(opt.origin)}</div>
             </div>
+            <div class="form-group" style="margin-top:0.6rem">
+                <label class="form-label">① 生成四宫格的提示语（指令，可修改）</label>
+                <textarea class="form-textarea" id="expInstr" style="min-height:64px" placeholder="生成四宫格的指令…">${this.esc(instr)}</textarea>
+            </div>
             <div class="sb-exp-actions" style="margin-top:0.6rem">
                 <button class="btn-secondary btn-small" id="expRewriteBtn" onclick="${opt.rewriteCall}">✨ 用大模型改写四宫格描述</button>
             </div>
             <div class="form-group" style="margin-top:0.5rem">
-                <label class="form-label">① 优化后的四宫格描述（连续 4 格剧情，可修改）</label>
+                <label class="form-label">② 优化后的四宫格描述（连续 4 格剧情，可修改）</label>
                 <textarea class="form-textarea" id="expDesc" style="min-height:140px" placeholder="左上→右上→左下→右下，四格连续剧情…">${this.esc(desc)}</textarea>
-            </div>
-            <div class="form-group" style="margin-top:0.6rem">
-                <label class="form-label">② 生成四宫格的提示语（指令，可修改）</label>
-                <textarea class="form-textarea" id="expInstr" style="min-height:64px" placeholder="生成四宫格的指令…">${this.esc(instr)}</textarea>
             </div>
             <div class="form-group" style="margin-top:0.6rem">
                 <label class="form-label">③ 参考图说明（@图N 是什么，可修改）</label>
@@ -1272,7 +1272,7 @@ const StoryboardModule = {
     },
 
     // 四宫格生成指令默认模板
-    QUAD_INSTR_DEFAULT: '请生成一张 2×2 四宫格连续分镜图（顺序：左上→右上→左下→右下），四格剧情连续、人物外形服装画风光线保持一致、格间动作平滑过渡，避免任何字幕文字。',
+    QUAD_INSTR_DEFAULT: '图1是当前分镜的画面，图2是下一个分镜的画面。请在图1（当前分镜）到图2（下一个分镜）之间，生成一张承上启下的 2×2 四宫格过渡分镜图（顺序：左上→右上→左下→右下）：第1格紧接图1的画面、第4格自然过渡到图2的画面，四格剧情连续、人物外形服装画风光线保持一致、格间动作平滑过渡，避免任何字幕文字。',
 
     // 根据当前参考图，生成「@图N 是什么」默认说明（按选择顺序：弹窗参考图，单分镜还会自动追加前后衔接图）
     _defaultRefDesc() {
@@ -1577,32 +1577,42 @@ const StoryboardModule = {
         App.showToast('已收回为单图（扩展数据保留，可重新展开）', 'success');
     },
 
-    // 取相邻分镜的衔接图：前一分镜的「末图/当前图」、后一分镜的「首图/当前图」
+    // 取相邻分镜的衔接图：前一分镜的「末图」、后一分镜的「首图」。
+    // 兼容三种分镜形态：① 单分镜（g.imageId）；② 单分镜已扩展四宫格（g.panelImages）；
+    // ③ 普通四宫格组（g.panelImages 切分图 / g.fourGridImageId 整张大图）。
+    // edge='last' 取该分镜最后一格（前一分镜用），edge='first' 取第一格（后一分镜用）。
     _neighborEdgeImages(p, gid) {
         const groups = p.storyboardGroups || [];
         const idx = groups.findIndex(x => x.id === gid);
-        const pick = (g) => {
-            if (!g) return '';
-            // 扩展过的分镜取最后一格，否则取当前图
-            if (g.expanded && (g.panelImages || []).length) {
-                const last = [...g.panelImages].reverse().find(Boolean);
-                const m = last != null ? Storage.getMediaById(this.projectId, last) : null;
-                if (m) return Storage.mediaUrl(m.data);
-            }
-            const im = g.imageId != null ? Storage.getMediaById(this.projectId, g.imageId) : null;
-            return im ? Storage.mediaUrl(im.data) : '';
+        const urlOf = (mid) => {
+            const m = mid != null ? Storage.getMediaById(this.projectId, mid) : null;
+            return m ? Storage.mediaUrl(m.data) : '';
         };
-        const pickFirst = (g) => {
+        const pickEdge = (g, edge) => {
             if (!g) return '';
-            if (g.expanded && (g.panelImages || []).length) {
-                const first = (g.panelImages || []).find(Boolean);
-                const m = first != null ? Storage.getMediaById(this.projectId, first) : null;
-                if (m) return Storage.mediaUrl(m.data);
+            // 优先用切分图（单分镜扩展 / 四宫格组都有 panelImages）：末图取最后一张、首图取第一张
+            const panels = (g.panelImages || []).filter(x => x != null);
+            if (panels.length) {
+                const mid = edge === 'last' ? panels[panels.length - 1] : panels[0];
+                const u = urlOf(mid);
+                if (u) return u;
             }
-            const im = g.imageId != null ? Storage.getMediaById(this.projectId, g.imageId) : null;
-            return im ? Storage.mediaUrl(im.data) : '';
+            // 单分镜当前图
+            if (g.imageId != null) {
+                const u = urlOf(g.imageId);
+                if (u) return u;
+            }
+            // 四宫格组未切分时退而用整张四宫格大图
+            if (g.fourGridImageId != null) {
+                const u = urlOf(g.fourGridImageId);
+                if (u) return u;
+            }
+            return '';
         };
-        return { prevUrl: pick(groups[idx - 1]), nextUrl: pickFirst(groups[idx + 1]) };
+        return {
+            prevUrl: pickEdge(groups[idx - 1], 'last'),
+            nextUrl: pickEdge(groups[idx + 1], 'first'),
+        };
     },
 
     // 从历史图像替换扩展四宫格的某一格面板
