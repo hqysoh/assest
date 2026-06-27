@@ -1,19 +1,20 @@
 #!/usr/bin/env python3
+import base64
 import json
 import os
-import sys
+import queue
+import random
+import re
+import shutil
 import sqlite3
 import subprocess
-import re
-import time
-import random
-import base64
-import requests
+import sys
 import threading
-import queue
-import shutil
+import time
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
+
+import requests
 
 COMFYUI_URL = "http://127.0.0.1:8188"
 TTS_WORKFLOW_PATH = os.path.join(os.path.dirname(__file__), "..", "workflow-api", "Qwen3-TD-TTS 语音设计.json")

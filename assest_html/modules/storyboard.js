@@ -1259,20 +1259,34 @@ const StoryboardModule = {
         const wrap = document.getElementById('expNeighborWrap');
         if (!wrap) return;
         const p = Storage.getProject(this.projectId);
+        const g = (p.storyboardGroups || []).find(x => String(x.id) === String(gid));
         const { prevUrl, nextUrl } = this._neighborEdgeImages(p, gid);
+        // 当前分镜关键帧：优先本分镜已选参考图第一张，否则本分镜当前图（与生图时的图2取法一致）
+        let curUrl = '';
+        const refIds0 = (g && g.refImageIds) || [];
+        if (refIds0.length) {
+            const m0 = Storage.getMediaById(this.projectId, refIds0[0]);
+            if (m0) curUrl = Storage.mediaUrl(m0.data);
+        }
+        if (!curUrl && g && g.imageId != null) {
+            const mi = Storage.getMediaById(this.projectId, g.imageId);
+            if (mi) curUrl = Storage.mediaUrl(mi.data);
+        }
         const cell = (url, label) => url
             ? `<div class="sb-exp-ref-cell" title="${label}（自动作为参考，不可移除）"><img src="${url}" loading="lazy"><span class="sb-exp-neighbor-tag">${label}</span></div>`
             : `<div class="sb-exp-ref-cell sb-exp-ref-empty" title="${label}：无可用图"><span class="sb-dim-hint" style="font-size:0.65rem;text-align:center;padding:0 4px">${label}<br>无</span></div>`;
         wrap.innerHTML = `
-            <div class="form-hint" style="margin:0.5rem 0 0.25rem">前后衔接图（自动参考，生成时随上面参考图一起发给模型）：</div>
+            <div class="form-hint" style="margin:0.5rem 0 0.25rem">衔接参考图（自动随上面参考图一起发给模型，顺序即图1/图2/图3）：</div>
             <div class="sb-exp-ref-list">
-                ${cell(prevUrl, '上一分镜末图')}
-                ${cell(nextUrl, '下一分镜首图')}
+                ${cell(prevUrl, '图1·上一分镜末')}
+                ${cell(curUrl, '图2·当前关键帧')}
+                ${cell(nextUrl, '图3·下一分镜首')}
             </div>`;
     },
 
     // 四宫格生成指令默认模板
-    QUAD_INSTR_DEFAULT: '图1是当前分镜的画面，图2是下一个分镜的画面。请在图1（当前分镜）到图2（下一个分镜）之间，生成一张承上启下的 2×2 四宫格过渡分镜图（顺序：左上→右上→左下→右下）：第1格紧接图1的画面、第4格自然过渡到图2的画面，四格剧情连续、人物外形服装画风光线保持一致、格间动作平滑过渡，避免任何字幕文字。',
+    // 三张参考图语义：图1=上一分镜的结尾画面、图2=当前分镜的关键帧、图3=下一个分镜的开头画面。
+    QUAD_INSTR_DEFAULT: '图1是上一个分镜的结尾画面，图2是当前分镜的关键帧，图3是下一个分镜的开头画面。请以图2（当前分镜关键帧）为核心，参考图1（上文结尾）与图3（下文开头）做承上启下，生成一张连贯的 2×2 四宫格分镜图（顺序：左上→右上→左下→右下）：四格围绕「当前分镜」展开、细致阐述当前这一镜的剧情发展与人物动作/表情的变化过程，第1格自然承接图1、第4格平滑过渡到图3，丰富当前画面的细节与层次；全程保持人物外形服装画风光线一致、格间动作连续平滑，避免任何字幕文字。',
 
     // 根据当前参考图，生成「@图N 是什么」默认说明（按选择顺序：弹窗参考图，单分镜还会自动追加前后衔接图）
     _defaultRefDesc() {
@@ -1478,19 +1492,32 @@ const StoryboardModule = {
             // 供下次打开扩展弹窗时恢复显示，直到下次重新优化。
             g.expandCtx = { instr, refDesc: (ctx.refDesc || '').trim(), desc: descPart };
 
-            // 3) 收集参考图：弹窗选中的参考图（若有）否则本分镜参考图 + 前一分镜末图 + 后一分镜首图（用于前后衔接）
+            // 3) 收集参考图，严格按「图1=上一分镜末图、图2=当前分镜关键帧、图3=下一分镜首图」的顺序发送，
+            //    与 QUAD_INSTR_DEFAULT 指令里的「图1/图2/图3」语义对齐。
             const refB64 = [];
+            const { prevUrl, nextUrl } = this._neighborEdgeImages(p, gid);
+            // 当前分镜关键帧：优先用弹窗已选/本分镜参考图的第一张，没有则用本分镜当前图 g.imageId
             const refIds = Array.isArray(presetRefIds) ? presetRefIds : (g.refImageIds || []);
-            for (const mid of refIds) {
+            let curUrl = '';
+            if (refIds.length) {
+                const m0 = Storage.getMediaById(this.projectId, refIds[0]);
+                if (m0) curUrl = Storage.mediaUrl(m0.data);
+            }
+            if (!curUrl && g.imageId != null) {
+                const mi = Storage.getMediaById(this.projectId, g.imageId);
+                if (mi) curUrl = Storage.mediaUrl(mi.data);
+            }
+            // 图1（上一末）→ 图2（当前关键帧）→ 图3（下一首），逐张转 b64 后入列
+            for (const u of [prevUrl, curUrl, nextUrl]) {
+                if (!u) continue;
+                const b64 = await this._urlToB64(u);
+                if (b64) refB64.push(b64);
+            }
+            // 若用户在弹窗里额外多选了参考图（refIds 第 2 张起），追加在末尾作为补充参考
+            for (const mid of refIds.slice(1)) {
                 const m = Storage.getMediaById(this.projectId, mid);
                 if (!m) continue;
                 const b64 = await this._urlToB64(Storage.mediaUrl(m.data));
-                if (b64) refB64.push(b64);
-            }
-            const { prevUrl, nextUrl } = this._neighborEdgeImages(p, gid);
-            for (const u of [prevUrl, nextUrl]) {
-                if (!u) continue;
-                const b64 = await this._urlToB64(u);
                 if (b64) refB64.push(b64);
             }
             if (!refB64.length) {
@@ -1583,7 +1610,9 @@ const StoryboardModule = {
     // edge='last' 取该分镜最后一格（前一分镜用），edge='first' 取第一格（后一分镜用）。
     _neighborEdgeImages(p, gid) {
         const groups = p.storyboardGroups || [];
-        const idx = groups.findIndex(x => x.id === gid);
+        // 用 String 比较：gid 多由 onclick 字符串传入，而 g.id 可能是数字，
+        // 严格 === 会匹配失败 → idx=-1 → 取不到前后分镜图（这是「衔接图不显示」的根因）。
+        const idx = groups.findIndex(x => String(x.id) === String(gid));
         const urlOf = (mid) => {
             const m = mid != null ? Storage.getMediaById(this.projectId, mid) : null;
             return m ? Storage.mediaUrl(m.data) : '';
