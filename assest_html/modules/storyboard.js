@@ -3535,13 +3535,14 @@ emotions: this._collectEmotions(),
                 return;
             }
             // 四宫格：逐面板，按 panel 勾选纳入；勾选但无切分图 → 跳过并计数。
-            // 本组 4 张图共享同一个 local prompt（分镜统一提示词 g.globalPrompt）。
+            // 每格使用「该格自己的 local 提示词」g.localPrompts[i]（不再共用全局 globalPrompt，
+            // 否则会出现「每个分镜 local 都一样」的问题）。
             // 配音/台词按格各自挂载：哪一格生成了 panelAudios[i] 就挂它自己的音频与该格台词
             //（支持「四格分别配音」）；某格没单独配音时，回退用本组第一段的音频/台词兜底，
             // 避免「四格都生成了音频，合成却只有第一格有声」的问题。
             const dlg = g.dialogues || [];
             const auds = g.panelAudios || [];
-            const sharedPrompt = (g.globalPrompt || '').trim();
+            const localPrompts = Array.isArray(g.localPrompts) ? g.localPrompts : [];
             // 本组是否「按格分别配音」：有任意非首格也生成了音频，则视为逐格配音模式
             const perPanelAudio = auds.filter(Boolean).length > 1
                 || auds.slice(1).some(Boolean);
@@ -3561,7 +3562,7 @@ emotions: this._collectEmotions(),
                     groupId: g.id, panel: i,
                     imageId: imgId,
                     audioId: useOwn ? (auds[i] || null) : (isGroupFirst ? auds[i] : null),
-                    prompt: sharedPrompt,   // 4 格共享同一 local prompt
+                    prompt: (localPrompts[i] || '').trim(),   // 该格自己的 local 提示词
                     length: 90, trimStart: 0,
                     transition: g.transition || 'cut',
                     shotTransition: (g.shotTransitions || [])[i] || '',
@@ -3653,7 +3654,7 @@ emotions: this._collectEmotions(),
             groupFrom, groupTo,                  // 视频历史命名用：参与合成的分镜组号范围
             fps: this.FPS,
             pxPerFrame: 1.4,                      // 缩放：像素/帧
-            globalPrompt: first.globalPrompt || first.prompt || '',
+            globalPrompt: '',                     // 全局提示词默认发空给 comfyui 导演台（由各段 local 提示词驱动；不再用某段提示词冒充全局）
             guideStrength: '1.00',                // 引导强度默认值（1.0=最大约束，最贴近引导图）
                 // Epsilon / 合成工作流：默认值取自设置（settings.videoDefaults），可在时间轴弹窗内临时改动
                 epsilon: (Storage.getSettings().videoDefaults || {}).epsilon ?? 0.9,
