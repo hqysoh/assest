@@ -934,7 +934,7 @@ const StoryboardModule = {
 
     // ===== 四宫格组「单个面板」扩展四宫格：把该面板这一格扩成 4 格连续剧情并生成四宫格、切分 =====
     // 结果存在 g.panelQuads[i] = { fourGridImageId, panelImages:[4], lines:[4] }，缩略图显示 🔢4 徽章，点击可看 4 格。
-    // 面板扩展确认弹窗：显示该面板原提示词，可 AI 改写为 4 句、手动编辑后生成四宫格
+    // 面板扩展确认弹窗：两步式（细化出 local + 四宫格提示语 → 生成）
     openPanelExpandModal(gid, i) {
         i = parseInt(i, 10) || 0;
         const p = Storage.getProject(this.projectId);
@@ -942,33 +942,41 @@ const StoryboardModule = {
         if (!g) return;
         const cur = ((g.localPrompts || [])[i] || g.globalPrompt || '').trim();
         if (!cur) { App.showToast('请先填写该面板的 local 提示词再扩展', 'info'); return; }
-        // 最终提示语：优先恢复上次保存的（含剧本占位符），否则按本面板 local 现场组装。
-        const savedPrompt = (g.panelExpandPrompts && g.panelExpandPrompts[i]) || '';
+        // 恢复上次细化保存的两段（细化后 local / 四宫格生成提示语）
+        const saved = (g.panelExpandPrompts && g.panelExpandPrompts[i]) || {};
         // 默认参考图按「图1=上一末、图2=当前面板、图3=下一首」顺序预置进列表，之后可手动增删/换序。
         const { prevId, nextId } = this._panelNeighborImages(p, gid, i);
         let curId = (g.panelImages || [])[i];
         if (curId == null) curId = g.fourGridImageId;
         this._expandRefIds = this._dedupIds([prevId, curId, nextId]);
+        // 衔接简述：组内相邻面板 local（越界用本组 globalPrompt 兜底）
+        const locals = g.localPrompts || [];
+        const clip = (t) => { t = (t || '').trim().replace(/\s+/g, ' '); return t.length > 200 ? t.slice(0, 200) + '…' : t; };
+        const neighbor = {
+            prev: clip((i > 0 ? locals[i - 1] : '') || g.globalPrompt || ''),
+            next: clip((i < locals.length - 1 ? locals[i + 1] : '') || g.globalPrompt || ''),
+        };
         this._renderExpandModal({
             title: `🔢 面板${i + 1} 扩展为四宫格`,
             origin: cur,
-            finalPrompt: savedPrompt,   // 为空时 _renderExpandModal 会用本面板 local 现场组装
+            refinedLocal: saved.refinedLocal || '',
+            quadPrompt: saved.quadPrompt || '',
+            neighbor,
             gid,
+            refineCall: `StoryboardModule.aiRefineQuadLines(${JSON.stringify(cur)})`,
             confirmCall: `StoryboardModule.confirmPanelExpandQuad('${gid}',${i})`,
         });
     },
 
     confirmPanelExpandQuad(gid, i) {
-        const ta = document.getElementById('expFinalPrompt');
-        const finalPrompt = ta ? (ta.value || '').trim() : '';
+        const { refinedLocal, quadPrompt } = this._readExpandPrompts();
         const refIds = (this._expandRefIds || []).slice();
         App.closeModal();
-        this.expandPanelToQuad(gid, i, refIds, finalPrompt);
+        this.expandPanelToQuad(gid, i, refIds, refinedLocal, quadPrompt);
     },
 
-    // presetRefIds 为弹窗参考图列表（按其顺序发送）；finalPrompt 为弹窗里编辑好的最终提示语（含剧本占位符）。
-    // 生图前把剧本占位符替换为完整剧本，直接发给生图模型，由它结合参考图自行拆解、丰富四宫格。
-    async expandPanelToQuad(gid, i, presetRefIds, finalPrompt) {
+    // presetRefIds=参考图列表；refinedLocal=细化后 local（回写覆盖本面板 local，可恢复）；quadPrompt=四宫格生成提示语。
+    async expandPanelToQuad(gid, i, presetRefIds, refinedLocal, quadPrompt) {
         i = parseInt(i, 10) || 0;
         const p = Storage.getProject(this.projectId);
         const g = (p.storyboardGroups || []).find(x => x.id === gid);
@@ -987,14 +995,21 @@ const StoryboardModule = {
         if (btn) { btn.disabled = true; btn.textContent = '⏳ 生成中'; }
         this._polls[pollKey] = 'pending';
         try {
-            // 1) 组装最终提示语：用弹窗编辑值，否则按本面板 local 现场组装；再把剧本占位符替换成完整剧本
-            const promptTpl = (finalPrompt && finalPrompt.trim()) ? finalPrompt : this._buildQuadPrompt(cur);
-            const quadPrompt = this._fillScript(promptTpl);
-            // 持久化保存本面板的最终提示语模板（含占位符），供下次打开弹窗恢复
+            // 1) 细化后的 local 回写覆盖本面板 local（首次改动时备份，可点「↩ 恢复」还原）
+            const newLocal = (refinedLocal || '').trim();
+            if (newLocal && newLocal !== cur) {
+                if (!Array.isArray(g.localPrompts)) g.localPrompts = [];
+                if (!Array.isArray(g.localBackup)) g.localBackup = [null, null, null, null];
+                if (g.localBackup[i] == null) g.localBackup[i] = (g.localPrompts[i] || '');
+                g.localPrompts[i] = newLocal;
+            }
+            // 2) 四宫格生成提示语：用弹窗的；为空时用细化后 local（或原 local）兜底
+            const quadPromptFinal = (quadPrompt || '').trim() || (newLocal || cur);
+            // 持久化保存本面板的两段，供下次打开弹窗恢复
             if (!Array.isArray(g.panelExpandPrompts)) g.panelExpandPrompts = [null, null, null, null];
-            g.panelExpandPrompts[i] = promptTpl;
+            g.panelExpandPrompts[i] = { refinedLocal: newLocal, quadPrompt: quadPromptFinal };
 
-            // 2) 收集参考图：直接按弹窗里参考图列表（presetRefIds）的顺序发送。
+            // 3) 收集参考图：直接按弹窗里参考图列表（presetRefIds）的顺序发送。
             const refB64 = [];
             const refList = Array.isArray(presetRefIds) ? presetRefIds : (this._expandRefIds || []);
             for (const mid of refList) {
@@ -1008,9 +1023,9 @@ const StoryboardModule = {
                 if (!ok) { delete this._polls[pollKey]; if (btn) { btn.disabled = false; btn.textContent = '🔢 扩展'; } return; }
             }
 
-            // 3) 提交生图
+            // 4) 提交生图
             const submit = await API.post('/api/storyboard/fourgrid', {
-                prompt: quadPrompt, ref_images: refB64,
+                prompt: quadPromptFinal, ref_images: refB64,
                 api_url: activeGroup.url, api_key: activeGroup.apiKey,
                 model: (activeGroup.models && activeGroup.models.find(m => /image/i.test(m))) || 'gpt-image-2',
                 size: defs.size || 'auto', quality: defs.quality || 'auto',
@@ -1103,13 +1118,16 @@ const StoryboardModule = {
         if (!have) {
             return `<div class="list-row-img sb-quad-stack"><div class="sb-thumb-placeholder">🔢<br>待扩展</div></div>`;
         }
-        const top = panelUrls.find(Boolean) || '';
-        // 叠放卡片：底层两张作出“一摞”的视觉，顶层为第 1 格
-        return `<div class="list-row-img sb-quad-stack" title="点击查看 4 格大图（可左右切换）" onclick="StoryboardModule.openQuadZoom('${g.id}',0)">
+        // 顶层显示「最近查看/替换的那一格」（lastShownPanel），这样替换非首格后缩略图也会变；该格无图则退回首张有图的格。
+        let shown = (typeof g.lastShownPanel === 'number') ? g.lastShownPanel : 0;
+        if (!panelUrls[shown]) shown = panelUrls.findIndex(Boolean);
+        const top = panelUrls[shown] || '';
+        // 叠放卡片：底层两张作出“一摞”的视觉，顶层为当前展示格；点击打开查看器并停在该格
+        return `<div class="list-row-img sb-quad-stack" title="点击查看 4 格大图（可左右切换）" onclick="StoryboardModule.openQuadZoom('${g.id}',${shown})">
             <div class="sb-quad-card sb-quad-card-3"></div>
             <div class="sb-quad-card sb-quad-card-2"></div>
-            <div class="sb-quad-card sb-quad-card-1"><img src="${top}" alt="四宫格第1格"></div>
-            <span class="sb-quad-badge">🔢 ${have}/4</span>
+            <div class="sb-quad-card sb-quad-card-1"><img src="${top}" alt="四宫格第${shown + 1}格"></div>
+            <span class="sb-quad-badge">🔢 ${shown + 1}/${have ? 4 : 0}格</span>
         </div>`;
     },
 
@@ -1119,6 +1137,8 @@ const StoryboardModule = {
         const g = (p.storyboardGroups || []).find(x => x.id === gid);
         if (!g || !g.expanded) return;
         idx = ((parseInt(idx, 10) || 0) % 4 + 4) % 4;
+        // 记住当前查看的格，让列表缩略图顶层同步显示该格（解决「替换非首格后缩略图看不出变化」）
+        if (g.lastShownPanel !== idx) { g.lastShownPanel = idx; Storage.updateProject(this.projectId, { storyboardGroups: p.storyboardGroups }); }
         const urls = (g.panelImages || []).map(mid => {
             const m = mid != null ? Storage.getMediaById(this.projectId, mid) : null;
             return m ? Storage.mediaUrl(m.data) : '';
@@ -1152,8 +1172,8 @@ const StoryboardModule = {
         if (!g) return;
         const cur = (g.prompt || '').trim();
         if (!cur) { App.showToast('请先填写画面提示词再扩展', 'info'); return; }
-        // 最终提示语：优先恢复上次保存的 expandPrompt（含剧本占位符），否则按当前分镜现场组装。
-        const savedPrompt = (g.expandCtx && g.expandCtx.finalPrompt) || '';
+        // 恢复上次细化保存的两段（细化后 local / 四宫格生成提示语），下次打开仍可见、可改。
+        const saved = g.expandCtx || {};
         // 默认参考图按「图1=上一末、图2=当前关键帧、图3=下一首」顺序预置，再跟上本分镜已选的其它参考图，之后可手动增删/换序。
         const { prevId, nextId } = this._neighborEdgeImages(p, gid);
         const refIds0 = (g.refImageIds || []).map(Number).filter(v => !isNaN(v));
@@ -1162,36 +1182,48 @@ const StoryboardModule = {
         this._renderExpandModal({
             title: '🔢 扩展为四宫格（连续 4 格剧情）',
             origin: cur,
-            finalPrompt: savedPrompt,   // 为空时 _renderExpandModal 会用当前分镜现场组装
+            refinedLocal: saved.refinedLocal || '',
+            quadPrompt: saved.quadPrompt || '',
+            neighbor: this._neighborPromptText(p, gid),
             gid,
+            refineCall: `StoryboardModule.aiRefineQuadLines(${JSON.stringify(cur)})`,
             confirmCall: `StoryboardModule.confirmExpandQuad('${gid}')`,
         });
     },
 
-    // 通用扩展弹窗渲染（单分镜 / 面板共用）
-    // 把「指令 + 当前分镜 local + 剧本占位符」组装成一条「最终提示语」直接发给生图模型，由它结合参考图自行丰富四格。
+    // 通用扩展弹窗渲染（单分镜 / 面板共用）—— 两步式：
+    //   ① 点「✨ 细化」：文本模型一次返回两段——细化后的 local 提示语 + 基于它的四宫格生成提示语，分别填进两个框（可手改）；
+    //   ② 点「生成四宫格」：把「四宫格生成提示语 + 参考图」直接发给生图模型作画。
+    // opt: { title, origin, refinedLocal, quadPrompt, neighbor:{prev,next}, gid, refineCall, confirmCall }
     _renderExpandModal(opt) {
-        // 最终提示语：优先用恢复的、否则按 当前分镜 local 现场组装（剧本用占位符）
-        const finalPrompt = (opt.finalPrompt && opt.finalPrompt.trim())
-            ? opt.finalPrompt
-            : this._buildQuadPrompt(opt.origin || '');
+        // 暂存相邻简述，供弹窗内「细化」按钮使用
+        this._expandNeighbor = opt.neighbor || { prev: '', next: '' };
+        const refinedLocal = opt.refinedLocal || '';
+        const quadPrompt = opt.quadPrompt || '';
         const mc = document.getElementById('modalContent');
         mc.innerHTML = `
         <div class="modal-header"><h2 class="modal-title">${opt.title}</h2><button class="modal-close" onclick="App.closeModal()">×</button></div>
         <div class="modal-body">
             <div class="form-group">
-                <label class="form-label">当前分镜提示语</label>
+                <label class="form-label">当前分镜提示语（原 local）</label>
                 <div class="sb-exp-origin">${this.esc(opt.origin)}</div>
             </div>
-            <div class="form-group" style="margin-top:0.6rem">
-                <label class="form-label">① 最终提示语（直接发给生图模型，可修改）</label>
-                <textarea class="form-textarea" id="expFinalPrompt" style="min-height:200px" placeholder="发给生图模型的完整提示语…">${this.esc(finalPrompt)}</textarea>
-                <span class="form-hint">${this.esc(this.SCRIPT_PLACEHOLDER)} 是占位符，生成时会自动替换为完整剧本；生图模型将结合当前分镜、剧本与下方参考图自行拆解、丰富四宫格。</span>
+            <div class="sb-exp-actions" style="margin-top:0.6rem">
+                <button class="btn-secondary btn-small" id="expRefineBtn" onclick="${opt.refineCall}">✨ 细化动作并生成四宫格提示语</button>
+                <span class="form-hint" style="margin-left:0.5rem">一次细化出「更具体的 local」与「四宫格生成提示语」两段，结合上一镜/下一镜简述做衔接（不发完整剧本）。</span>
+            </div>
+            <div class="form-group" style="margin-top:0.5rem">
+                <label class="form-label">① 细化后的 local 提示语（可手改；生成时会回写覆盖本分镜 local，可恢复）</label>
+                <textarea class="form-textarea" id="expRefinedLocal" style="min-height:96px" placeholder="点「✨ 细化」自动生成，或手动填写更具体的当前分镜画面…">${this.esc(refinedLocal)}</textarea>
+            </div>
+            <div class="form-group" style="margin-top:0.5rem">
+                <label class="form-label">② 四宫格生成提示语（直接发给生图模型，可手改）</label>
+                <textarea class="form-textarea" id="expQuadPrompt" style="min-height:160px" placeholder="点「✨ 细化」自动生成；留空直接生成则由生图模型按上面 local 自行拆四格…">${this.esc(quadPrompt)}</textarea>
             </div>
             <div class="form-group" style="margin-top:0.6rem">
-                <label class="form-label">② 参考图（默认含 图1上一末/图2当前/图3下一首，可增删换序，按顺序发给模型）</label>
+                <label class="form-label">③ 参考图（默认含 图1上一末/图2当前/图3下一首，可增删换序，按顺序发给模型）</label>
                 <div id="expRefWrap"></div>
-                <span class="form-hint">每张图的含义可在上面「① 最终提示语」里自行说明。</span>
+                <span class="form-hint">图1=上一镜结尾、图2=当前关键帧、图3=下一镜开头，用于保持人物与画面衔接一致。</span>
             </div>
         </div>
         <div class="modal-footer">
@@ -1200,6 +1232,32 @@ const StoryboardModule = {
         </div>`;
         document.getElementById('modalOverlay').classList.add('active');
         this._renderExpandRefs();
+    },
+
+    // 读取弹窗里的两段：{ refinedLocal, quadPrompt }
+    _readExpandPrompts() {
+        const v = id => { const e = document.getElementById(id); return e ? (e.value || '').trim() : ''; };
+        return { refinedLocal: v('expRefinedLocal'), quadPrompt: v('expQuadPrompt') };
+    },
+
+    // 弹窗内：点「✨ 细化」→ 文本模型一次返回两段，分别回填两个文本框
+    async aiRefineQuadLines(origin) {
+        const cur = (origin || '').trim();
+        if (!cur) { App.showToast('当前分镜提示语为空', 'info'); return; }
+        const btn = document.getElementById('expRefineBtn');
+        if (btn) { btn.disabled = true; btn.textContent = '⏳ 细化中…'; }
+        try {
+            const { local, quad } = await this._refineLocalAndQuad(cur, this._expandNeighbor);
+            const elLocal = document.getElementById('expRefinedLocal');
+            const elQuad = document.getElementById('expQuadPrompt');
+            if (elLocal) elLocal.value = local;
+            if (elQuad) elQuad.value = quad;
+            App.showToast('已细化出 local 与四宫格提示语，可手改后生成', 'success');
+        } catch (e) {
+            App.showToast('细化失败：' + (e.message || e), 'error');
+        } finally {
+            if (btn) { btn.disabled = false; btn.textContent = '✨ 细化动作并生成四宫格提示语'; }
+        }
     },
 
     // 去重并过滤掉空值，保持首次出现顺序（用于把 图1/图2/图3 与用户已选图合并为参考图列表）
@@ -1216,24 +1274,48 @@ const StoryboardModule = {
         return out;
     },
 
-    // 剧本占位符：弹窗里只展示该占位符避免太长，真正发送给生图模型时替换为完整剧本全文。
-    SCRIPT_PLACEHOLDER: '{{剧本}}',
+    // 细化输出的两段分隔标记（文本模型按此格式返回，前端据此切分）。
+    REFINE_LOCAL_TAG: '【细化后LOCAL】',
+    REFINE_QUAD_TAG: '【四宫格提示语】',
 
-    // 四宫格生成指令默认模板（直接发给生图模型，由它结合「当前分镜+剧本+参考图」自行丰富四格）
-    // 参考图按顺序：图1=上一分镜结尾、图2=当前分镜关键帧、图3=下一分镜开头（数量可由用户在弹窗里增删）。
-    QUAD_INSTR_DEFAULT: '你是分镜师。请把「当前分镜」拆解、丰富为一张连贯的 2×2 四宫格分镜图（顺序：左上→右上→左下→右下）。参考图按顺序通常为：图1=上一分镜的结尾画面、图2=当前分镜的关键帧、图3=下一分镜的开头画面；请以图2为核心，参考图1/图3做承上启下。请结合下方「当前分镜」描述与「完整剧本」的整体剧情走向，自行细化当前这一镜的剧情发展与人物动作/表情变化：第1格自然承接上一分镜、第4格平滑过渡到下一分镜，四格剧情连续、丰富画面细节与层次；全程保持人物外形服装画风光线一致、格间动作连续平滑，避免任何字幕文字。',
+    // 发给「文本模型」的细化系统提示：一次返回两段——①细化后的 local 提示语；②基于该 local 的四宫格生成提示语。
+    // {context} 注入「上一镜/下一镜简述」做衔接参考（不发全文剧本）；用户消息为当前分镜 local 提示语。
+    REFINE_SYS_PROMPT: '你是专业的影视分镜师。下面给出「当前分镜」的画面提示语，以及上一镜/下一镜的简短描述作为衔接参考（不要把上下镜内容直接画进当前镜）。请完成两件事，并严格按指定格式分两段输出：\n' +
+        '① 细化「当前分镜」：在保持原意与人物/场景一致的前提下，把这一镜的动作、表情、镜头语言（景别/机位/运镜）、光线氛围写得更具体、更有画面感，输出为一段完整的画面提示语（不要分点、不要编号）。\n' +
+        '② 基于①细化后的 local，写一条「生成四宫格的提示语」：要求生图模型据此生成一张连贯的 2×2 四宫格分镜图（顺序：左上→右上→左下→右下），把这一镜的动作按「起→承→转→合」拆成连续 4 格、格间动作平滑过渡、第1格自然承接上一镜、第4格平滑过渡到下一镜；并说明参考图按顺序为「图1=上一镜结尾、图2=当前关键帧、图3=下一镜开头」，以图2为核心、图1/图3承上启下；全程保持人物外形服装画风光线一致，避免任何字幕文字。\n' +
+        '严格输出格式（不要任何额外解释）：\n' +
+        '【细化后LOCAL】\n<细化后的当前分镜画面提示语>\n【四宫格提示语】\n<生成四宫格的完整提示语>\n\n' +
+        '【上下文衔接参考】\n{context}',
 
-    // 组装发给生图模型的「最终提示语」：指令 + 当前分镜 local 提示语 + 完整剧本（占位符）。
-    // 弹窗里展示时剧本用占位符，避免过长；生图前再用 _fillScript 把占位符替换为剧本全文。
-    _buildQuadPrompt(localPrompt) {
-        return `${this.QUAD_INSTR_DEFAULT}\n\n【当前分镜】\n${(localPrompt || '').trim()}\n\n【完整剧本（供参考整体剧情走向）】\n${this.SCRIPT_PLACEHOLDER}`;
+    // 解析文本模型返回的两段：{ local, quad }。兼容缺标记时的兜底。
+    _parseRefine(text) {
+        const t = (text || '').trim();
+        const li = t.indexOf(this.REFINE_LOCAL_TAG);
+        const qi = t.indexOf(this.REFINE_QUAD_TAG);
+        if (li !== -1 && qi !== -1 && qi > li) {
+            const local = t.slice(li + this.REFINE_LOCAL_TAG.length, qi).trim();
+            const quad = t.slice(qi + this.REFINE_QUAD_TAG.length).trim();
+            return { local, quad };
+        }
+        // 兜底：没按格式返回时，整段都当作四宫格提示语，local 留空
+        return { local: '', quad: t };
     },
 
-    // 把最终提示语里的剧本占位符替换为完整剧本（无剧本时替换为「（无）」）
-    _fillScript(prompt) {
-        const p = Storage.getProject(this.projectId);
-        const script = (p && p.script) ? p.script.trim() : '';
-        return (prompt || '').split(this.SCRIPT_PLACEHOLDER).join(script || '（无）');
+    // 一次 LLM 调用，返回两段：① 细化后的 local；② 基于新 local 的四宫格生成提示语。
+    // origin=当前分镜 local；neighbor={prev,next}=上一镜/下一镜简述（衔接参考，非全文剧本）。
+    async _refineLocalAndQuad(origin, neighbor) {
+        const llm = SettingsModule.getLlmConfig();
+        if (!llm.key) throw new Error('请先在设置页填写文本大模型 API Key');
+        const ctx = `上一镜：${(neighbor && neighbor.prev) || '（无，本镜为开头）'}\n下一镜：${(neighbor && neighbor.next) || '（无，本镜为结尾）'}`;
+        const sys = this.REFINE_SYS_PROMPT.replace('{context}', ctx);
+        const r = await API.post('/api/llm/optimize_prompt', {
+            mode: 'optimize', prompt: origin, script: '',   // optimize 模式只返回 text，不再发完整剧本
+            system_prompt: sys,
+            api_url: llm.url, api_key: llm.key, model: llm.model,
+        });
+        if (!r.success || !r.text) throw new Error(r.error || '细化失败');
+        const { local, quad } = this._parseRefine(r.text);
+        return { local: local || origin, quad: quad || origin };
     },
 
     // 渲染弹窗内「已选参考图」缩略图（可点 × 移除）+ 选择按钮
@@ -1297,18 +1379,17 @@ const StoryboardModule = {
         this._renderExpandRefs();
     },
 
-    // 确认生成（单分镜）：用弹窗里编辑好的最终提示语 + 参考图，直接发给生图模型生成四宫格
+    // 确认生成（单分镜）：读弹窗两段（细化后 local / 四宫格生成提示语），回写 local 后用四宫格提示语生成
     confirmExpandQuad(gid) {
-        const ta = document.getElementById('expFinalPrompt');
-        const finalPrompt = ta ? (ta.value || '').trim() : '';
+        const { refinedLocal, quadPrompt } = this._readExpandPrompts();
         const refIds = (this._expandRefIds || []).slice();
         App.closeModal();
-        this.expandSingleToQuad(gid, refIds, finalPrompt);
+        this.expandSingleToQuad(gid, refIds, refinedLocal, quadPrompt);
     },
 
-    // presetRefIds 为弹窗参考图列表（按其顺序发送）；finalPrompt 为弹窗里编辑好的最终提示语（含剧本占位符）。
-    // 生图前把剧本占位符替换为完整剧本，直接发给生图模型，由它结合参考图自行拆解、丰富四宫格。
-    async expandSingleToQuad(gid, presetRefIds, finalPrompt) {
+    // presetRefIds=弹窗参考图列表（按顺序发送）；refinedLocal=细化后的 local（会回写覆盖本分镜 local，可恢复）；
+    // quadPrompt=四宫格生成提示语（直接发给生图模型）。两者为空时用当前 local 兜底。
+    async expandSingleToQuad(gid, presetRefIds, refinedLocal, quadPrompt) {
         const p = Storage.getProject(this.projectId);
         const g = (p.storyboardGroups || []).find(x => x.id === gid);
         if (!g) return;
@@ -1325,11 +1406,16 @@ const StoryboardModule = {
         if (btn) { btn.disabled = true; btn.textContent = '⏳ 生成中'; }
         this._polls['si_exp_' + gid] = 'pending';
         try {
-            // 1) 组装最终提示语：用弹窗编辑值，否则按当前分镜现场组装；再把剧本占位符替换成完整剧本
-            const promptTpl = (finalPrompt && finalPrompt.trim()) ? finalPrompt : this._buildQuadPrompt(cur);
-            const quadPrompt = this._fillScript(promptTpl);
-            // 持久化保存本次弹窗里编辑的最终提示语模板（含占位符），供下次打开扩展弹窗恢复显示。
-            g.expandCtx = { finalPrompt: promptTpl };
+            // 1) 细化后的 local 回写覆盖分镜原 local（首次改动时备份，可点「↩ 恢复」还原）
+            const newLocal = (refinedLocal || '').trim();
+            if (newLocal && newLocal !== cur) {
+                if (g.promptBackup == null) g.promptBackup = cur;
+                g.prompt = newLocal;
+            }
+            // 2) 四宫格生成提示语：用弹窗的；为空时用细化后 local（或原 local）兜底，让生图模型自行拆四格
+            const quadPromptFinal = (quadPrompt || '').trim() || (newLocal || cur);
+            // 持久化保存本次两段，供下次打开扩展弹窗恢复显示。
+            g.expandCtx = { refinedLocal: newLocal, quadPrompt: quadPromptFinal };
 
             // 2) 收集参考图：直接按弹窗里参考图列表（presetRefIds）的顺序发送。
             const refB64 = [];
@@ -1351,7 +1437,7 @@ const StoryboardModule = {
 
             // 3) 提交四宫格生图
             const submit = await API.post('/api/storyboard/fourgrid', {
-                prompt: quadPrompt,
+                prompt: quadPromptFinal,
                 ref_images: refB64,
                 api_url: activeGroup.url,
                 api_key: activeGroup.apiKey,
@@ -1387,8 +1473,8 @@ const StoryboardModule = {
             if (result && result.images && result.images[0]) {
                 const dataUrl = 'data:image/png;base64,' + result.images[0];
                 const dims = await CharacterModule.computeDims(dataUrl);
-                // 备份单图状态，便于「收回」恢复
-                if (gg.singleBackupImageId === undefined) gg.singleBackupImageId = gg.imageId || null;
+                // 备份原单图，便于「收回」恢复：仅在还没备份过、且当前确有单图时记录，避免把空值当备份。
+                if (gg.singleBackupImageId == null && gg.imageId != null) gg.singleBackupImageId = gg.imageId;
                 const entry = await Storage._addMedia(this.projectId, 'image', 'storyboards', gid + '_quad', dataUrl, null, dims);
                 gg.fourGridImageId = entry.id;
                 gg.expanded = true;
@@ -1418,10 +1504,29 @@ const StoryboardModule = {
         const g = (p.storyboardGroups || []).find(x => x.id === gid);
         if (!g) return;
         g.expanded = false;
-        if (g.singleBackupImageId !== undefined) { g.imageId = g.singleBackupImageId; delete g.singleBackupImageId; }
+
+        // 恢复单图，按优先级兜底，确保「收回」一定能换回一张原单图：
+        // 1) 扩展时记下的备份；2) 当前 imageId（若仍有效）；3) 单分镜历史里最近一张原单图。
+        const valid = (id) => id != null && Storage.getMediaById(this.projectId, id);
+        let restoreId = null;
+        if (valid(g.singleBackupImageId)) restoreId = g.singleBackupImageId;
+        else if (valid(g.imageId)) restoreId = g.imageId;
+        else {
+            // 从单分镜历史图像里找最近一张（排除四宫格大图/切分面板）
+            const hist = Storage.getMediaForItem(this.projectId, 'storyboards', gid + '_single')
+                .filter(m => m.type === 'image')
+                .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+            if (hist.length) restoreId = hist[0].id;
+        }
+        delete g.singleBackupImageId;
+        g.imageId = restoreId;
         Storage.updateProject(this.projectId, { storyboardGroups: p.storyboardGroups });
         this.render(this.projectId);
-        App.showToast('已收回为单图（扩展数据保留，可重新展开）', 'success');
+        if (restoreId != null) {
+            App.showToast('已收回为单图（四宫格数据保留，可重新展开）', 'success');
+        } else {
+            App.showToast('已收回为单图，但没找到原单图，请点「🎨 生成」重新生成一张', 'info');
+        }
     },
 
     // 取相邻分镜的衔接图：前一分镜的「末图」、后一分镜的「首图」。
@@ -1449,6 +1554,22 @@ const StoryboardModule = {
         const prevId = idOf(groups[idx - 1], 'last');
         const nextId = idOf(groups[idx + 1], 'first');
         return { prevId, nextId, prevUrl: urlOf(prevId), nextUrl: urlOf(nextId) };
+    },
+
+    // 取相邻分镜的「文字描述」（上一镜 / 下一镜），仅作细化时的衔接参考，不是完整剧本。
+    // 单分镜用 g.prompt；四宫格组用 globalPrompt 或首尾格 localPrompts。截断防过长。
+    _neighborPromptText(p, gid) {
+        const groups = p.storyboardGroups || [];
+        const idx = groups.findIndex(x => String(x.id) === String(gid));
+        const textOf = (g, edge) => {
+            if (!g) return '';
+            if (g.prompt) return g.prompt;                 // 单分镜
+            const locals = (g.localPrompts || []).filter(Boolean);
+            if (locals.length) return edge === 'last' ? locals[locals.length - 1] : locals[0];
+            return g.globalPrompt || '';
+        };
+        const clip = (t) => { t = (t || '').trim().replace(/\s+/g, ' '); return t.length > 200 ? t.slice(0, 200) + '…' : t; };
+        return { prev: clip(textOf(groups[idx - 1], 'last')), next: clip(textOf(groups[idx + 1], 'first')) };
     },
 
     // 面板扩展专用的前后衔接图：以「组内相邻面板」为主，越界才跨到相邻分镜组。
@@ -1518,9 +1639,10 @@ const StoryboardModule = {
         const copy = await Storage._addMedia(this.projectId, 'image', 'storyboards', gid + '_panel' + idx, dataUrl, null, dims);
         if (!Array.isArray(g.panelImages)) g.panelImages = [null, null, null, null];
         g.panelImages[idx] = copy.id;
+        g.lastShownPanel = idx;   // 缩略图顶层切到刚替换的这一格，列表立即体现变化
         Storage.updateProject(this.projectId, { storyboardGroups: p.storyboardGroups });
-        App.showToast('已替换第 ' + (idx + 1) + ' 格', 'success');
-        this.openQuadZoom(gid, idx);
+        App.showToast(`已替换第 ${idx + 1} 格，列表缩略图与查看器已更新到该格`, 'success');
+        this.openQuadZoom(gid, idx);   // 重新打开查看器并停在该格，直接看到替换效果
         this.render(this.projectId);
     },
 
@@ -3892,7 +4014,7 @@ emotions: this._collectEmotions(),
         all.forEach((g) => {
             if (g.single) {
                 if (g.selected === false) return;        // 未勾选合成 → 不纳入
-                // 扩展四宫格的单分镜：拆成 4 段连续（占原时长平分），逐格用 panelImages + 改写的 expandLines
+                // 扩展四宫格的单分镜：拆成 4 段连续（占原时长平分），逐格用 panelImages（提示语统一用分镜 local）
                 if (g.expanded && Array.isArray(g.panelImages) && g.panelImages.some(x => x != null)) {
                     const panels = g.panelImages || [];
                     if (panels.every(x => x == null)) { skipNoImg++; return; }
@@ -3906,7 +4028,7 @@ emotions: this._collectEmotions(),
                             imageId: imgId,
                             // 台词只放第 1 格，避免 4 段重复同一句配音
                             audioId: i === 0 ? g.audioId : null,
-                            prompt: (g.expandLines || [])[i] || g.prompt || '',
+                            prompt: g.prompt || '',
                             length: 90, trimStart: 0,
                             transition: g.transition || 'cut',
                             shotTransition: (g.shotTransitions || [])[i] || '',
@@ -3930,11 +4052,16 @@ emotions: this._collectEmotions(),
                 return;
             }
             // 四宫格：逐面板，按 panel 勾选纳入；勾选但无切分图 → 跳过并计数。
-            // 本组 4 张图共享同一个 local prompt（分镜统一提示词 g.globalPrompt），
-            // 不再各格用各自的 localPrompts[i]；台词/配音只挂在本组纳入时间轴的「第一段」上，
-            // 其余格不重复配音（避免同一句台词被读 4 遍）。
+            // 本组 4 张图共享同一个 local prompt（分镜统一提示词 g.globalPrompt）。
+            // 配音/台词按格各自挂载：哪一格生成了 panelAudios[i] 就挂它自己的音频与该格台词
+            //（支持「四格分别配音」）；某格没单独配音时，回退用本组第一段的音频/台词兜底，
+            // 避免「四格都生成了音频，合成却只有第一格有声」的问题。
             const dlg = g.dialogues || [];
+            const auds = g.panelAudios || [];
             const sharedPrompt = (g.globalPrompt || '').trim();
+            // 本组是否「按格分别配音」：有任意非首格也生成了音频，则视为逐格配音模式
+            const perPanelAudio = auds.filter(Boolean).length > 1
+                || auds.slice(1).some(Boolean);
             let groupFirstDone = false;   // 本组是否已放置过「带台词的第一段」
             for (let i = 0; i < 4; i++) {
                 if (g.panelSelected && g.panelSelected[i] === false) continue;  // 未勾选
@@ -3943,18 +4070,19 @@ emotions: this._collectEmotions(),
                 if (!firstMeta) firstMeta = g;
                 const isGroupFirst = !groupFirstDone;   // 本组第一段（物理 panel 不一定是 0，按实际纳入顺序）
                 groupFirstDone = true;
+                // 逐格配音模式：每格挂各自的音频 + 各自台词；
+                // 单句配音模式（仅第一格有音频）：保持老行为，只第一段带，避免同一句被读 4 遍。
+                const useOwn = perPanelAudio;
                 segments.push({
                     uid: Storage._uid(),
                     groupId: g.id, panel: i,
                     imageId: imgId,
-                    // 配音只第一段带：取本组「第一格当前选中音频」，后续格不配音
-                    audioId: isGroupFirst ? (g.panelAudios || [])[i] : null,
+                    audioId: useOwn ? (auds[i] || null) : (isGroupFirst ? auds[i] : null),
                     prompt: sharedPrompt,   // 4 格共享同一 local prompt
                     length: 90, trimStart: 0,
                     transition: g.transition || 'cut',
                     shotTransition: (g.shotTransitions || [])[i] || '',
-                    // 台词只第一段带，其余格清空，避免重复字幕/配音
-                    dialogue: isGroupFirst ? (dlg[i] || {}) : {},
+                    dialogue: useOwn ? (dlg[i] || {}) : (isGroupFirst ? (dlg[i] || {}) : {}),
                 });
             }
         });
