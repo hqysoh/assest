@@ -123,8 +123,9 @@ const SettingsModule = {
                 <div class="form-col">
                     <label class="form-label">默认合成工作流</label>
                     <select class="form-input" id="vdWorkflow" onchange="SettingsModule.saveVideoDefaults()">
-                        <option value="director" ${(s.videoDefaults||{}).workflow==='singularity'?'':'selected'}>旧导演台 LTXDirector</option>
-                        <option value="singularity" ${(s.videoDefaults||{}).workflow==='singularity'?'selected':''}>Singularity 乱神版V3</option>
+<option value="director" ${((s.videoDefaults||{}).workflow||'director')==='director'?'selected':''}>旧导演台 LTXDirector</option>
+<option value="singularity" ${(s.videoDefaults||{}).workflow==='singularity'?'selected':''}>Singularity 乱神版V3</option>
+<option value="yusu" ${(s.videoDefaults||{}).workflow==='yusu'?'selected':''}>Yusu 导演台</option>
                     </select>
                 </div>
                 <div class="form-col">
@@ -140,7 +141,7 @@ const SettingsModule = {
                     <select class="form-input" id="vdResolution" onchange="SettingsModule.saveVideoDefaults()">${this.videoResOpts((s.videoDefaults||{}).resolution || '1280 x 720 (16:9)')}</select>
                 </div>
             </div>
-            <p class="form-hint">进入「合成视频」时间轴时作为初始值：合成工作流 <code>director</code>(旧导演台) / <code>singularity</code>(乱神版V3)；Epsilon 越小越接近硬切（0.001），越大转场越柔和（1.0）；分辨率右侧标注横/竖屏与画面比例（乱神版V3 写入时间轴 resolution，旧导演台换算为 custom_width/height）。进入时间轴后仍可临时调整，点「生成视频」时会再次确认工作流。</p>
+            <p class="form-hint">进入「合成视频」时间轴时作为初始值：合成工作流 <code>director</code>(旧导演台) / <code>singularity</code>(乱神版V3) / <code>yusu</code>(Yusu 导演台)；Epsilon 越小越接近硬切（0.001），越大转场越柔和（1.0）；分辨率右侧标注横/竖屏与画面比例（乱神版V3 写入时间轴 resolution，旧导演台换算为 custom_width/height）。进入时间轴后仍可临时调整，点「生成视频」时会再次确认工作流。</p>
         </div>
 
         <div class="settings-section">
@@ -282,7 +283,7 @@ const SettingsModule = {
     saveVideoDefaults() {
         const s = Storage.getSettings();
         const wfRaw = (document.getElementById('vdWorkflow') || {}).value;
-        const workflow = (wfRaw === 'singularity') ? 'singularity' : 'director';
+        const workflow = (wfRaw === 'singularity' || wfRaw === 'yusu') ? wfRaw : 'director';
         let epsilon = parseFloat((document.getElementById('vdEpsilon') || {}).value);
         if (!Number.isFinite(epsilon)) epsilon = 0.9;
         if (epsilon < 0.001) epsilon = 0.001;

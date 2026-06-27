@@ -49,6 +49,9 @@ SB_JOB_TTL = 3600          # 分镜/视频类任务保留 1 小时（生成更�
 DIRECTOR_WORKFLOW_PATH = os.path.join(os.path.dirname(__file__), "..", "workflow-api", "AI代码侠土豆-LTX2.3导演台工作流.json")
 # Singularity（乱神版 V3）导演台工作流：基于 easy timelineEditor 的 timeline_data 格式
 DIRECTOR_SINGULARITY_WORKFLOW_PATH = os.path.join(os.path.dirname(__file__), "..", "workflow-api", "Ltx2.3 Singularity+EasyMedia导演工作台(乱神版)V3.json")
+# Yusu 导演台工作流：核心节点 YusuLTXDirector（暴露原生 LTXV 采样链 + LoRA + 运动轨）。
+# timeline_data 格式与旧 LTXDirector 高度同构（segments + audioSegments），故注入逻辑基本复用旧导演台。
+DIRECTOR_YUSU_WORKFLOW_PATH = os.path.join(os.path.dirname(__file__), "..", "workflow-api", "yusu-工作流.json")
 TTS_CLONE_WORKFLOW_PATH = os.path.join(os.path.dirname(__file__), "..", "workflow-api", "vocpm语音克隆.json")
 # Qwen3-TD-TTS 语音克隆工作流（备选，TDQwen3TTSVoiceClone 节点）
 TTS_CLONE_QWEN3_WORKFLOW_PATH = os.path.join(os.path.dirname(__file__), "..", "workflow-api", "Qwen3-TD-TTS语音克隆.json")
@@ -1756,6 +1759,241 @@ def run_director_sync(params, task_id=None):
             'video_file': vpath, 'video_name': item.get('filename', '')}
 
 
+def run_director_yusu_sync(params, task_id=None):
+    """Yusu 导演台视频生成。
+
+    核心节点 YusuLTXDirector（节点 174）暴露了原生 LTXV 采样链（DualCLIP / SamplerCustomAdvanced /
+    CFGGuider / BasicScheduler / 独立音视频 VAE 解码）+ LoRA + 运动轨，相比旧 LTXDirector 黑盒更可控。
+    其 timeline_data 与旧 LTXDirector 高度同构：
+      { "global_prompt", "segments":[{id,start,length,prompt,type,imageFile,imageB64}],
+        "audioSegments":[{id,type,start,length,trimStart,audioFile,fileName}],
+        "motionSegments":[], ... }
+    因此本 runner 复用旧导演台的段组装逻辑，仅在注入处适配 YusuLTXDirector 的字段差异：
+      - global_prompt 内嵌在 timeline_data 内层（本版按需求留空）；
+      - motion 运动轨首版留空（use_custom_motion=false, motionSegments=[]）；
+      - 分辨率写入 custom_width/height；frame_rate 跟随 fps。
+
+    入参同旧导演台双轨格式：imageSegments / audioSegments / total_frames / epsilon /
+    guide_strength / use_custom_audio / fps / resolution。
+    """
+    if not os.path.exists(DIRECTOR_YUSU_WORKFLOW_PATH):
+        return {'success': False, 'error': '未找到 Yusu 导演台工作流文件'}
+    with open(DIRECTOR_YUSU_WORKFLOW_PATH, 'r', encoding='utf-8') as f:
+        workflow = json.load(f)
+
+    # 兼容误存成 ComfyUI 网页版「完整工作流」格式（含 nodes/links）
+    if isinstance(workflow, dict) and 'nodes' in workflow and isinstance(workflow.get('nodes'), list):
+        converted = _convert_ui_workflow_to_api(workflow)
+        if converted is None:
+            return {'success': False, 'error': (
+                'Yusu 导演台工作流是 ComfyUI「网页版完整格式」（含 nodes/links），'
+                '而后端需要「API 格式」。请在 ComfyUI 里用「导出(API)/Save (API Format)」'
+                '重新导出并覆盖 workflow-api/yusu-工作流.json')}
+        workflow = converted
+
+    fps = int(params.get('fps', 30))
+    timeline_segments = []
+    audio_segments = []
+    local_prompts = []
+    seg_lengths = []
+
+    img_segs = sorted(params.get('imageSegments') or [], key=lambda s: int(s.get('start', 0)))
+    aud_segs = params.get('audioSegments') or []
+    if not img_segs:
+        # 兼容旧版成对格式
+        segs = params.get('segments') or []
+        img_segs = [{'image_b64': s.get('image_b64', ''), 'prompt': s.get('prompt', ''),
+                     'start': 0, 'length': int(s.get('length', 90))} for s in segs]
+    if not img_segs:
+        return {'success': False, 'error': '缺少图像段'}
+
+    # ---------- 组装图像轨（含转场段），逻辑同旧导演台 ----------
+    cursor = 0
+    shift_points = []          # [(orig_end_frame, cumulative_shift)] 供音频对齐
+    cumulative_shift = 0
+    uploaded_names = []        # 本次上传到 input 的临时文件，结束后清理
+    for i, seg in enumerate(img_segs):
+        length = int(seg.get('length', 90))
+        # 空段跳过：既没有图也没有提示词的段不发给 ComfyUI，否则 director 报「missing a prompt」
+        if not seg.get('image_b64') and not (seg.get('prompt', '') or '').strip():
+            continue
+        img_file = ''
+        if seg.get('image_b64'):
+            try:
+                raw = base64.b64decode(seg['image_b64'])
+                img_file = comfy_upload_file(raw, f"sbimg_{int(time.time()*1000)}_{i}.png")
+                uploaded_names.append(img_file)
+            except Exception as e:
+                comfy_cleanup_input_files(uploaded_names)
+                return {'success': False, 'error': f'第{i+1}个图像段上传失败: {e}'}
+        timeline_segments.append({
+            'id': f'seg{i}_{random.randint(1000,9999)}',
+            'start': cursor, 'length': length,
+            'prompt': seg.get('prompt', ''),
+            'type': 'image',
+            'imageFile': img_file,
+            'imageB64': f"/api/view?filename={img_file}&type=input&subfolder=",
+            'isEndFrame': False,
+        })
+        local_prompts.append(seg.get('prompt', ''))
+        seg_lengths.append(str(length))
+        orig_end = int(seg.get('start', 0)) + length
+        cursor += length
+
+        # 相邻段之间插入转场段（无图、纯文本），最后一段不插
+        trans_text = str(seg.get('transition', '') or '').strip()
+        trans_frames = int(round(float(seg.get('transition_dur', 0) or 0) * fps))
+        if i < len(img_segs) - 1 and trans_text and trans_frames > 0:
+            trans_prompt = trans_text if '无字幕' in trans_text else (trans_text + '，无字幕')
+            timeline_segments.append({
+                'id': f'trans{i}_{random.randint(1000,9999)}',
+                'start': cursor, 'length': trans_frames,
+                'prompt': trans_prompt,
+                'type': 'transition',
+                'imageFile': '',
+                'imageB64': '',
+                'isEndFrame': False,
+            })
+            local_prompts.append(trans_prompt)
+            seg_lengths.append(str(trans_frames))
+            cursor += trans_frames
+            cumulative_shift += trans_frames
+        shift_points.append((orig_end, cumulative_shift))
+
+    def _shift_for(orig_frame):
+        extra = 0
+        for boundary, total in shift_points:
+            if orig_frame >= boundary:
+                extra = total
+        return extra
+
+    # ---------- 组装音频轨（接入时间轴上传的自定义配音），逻辑同旧导演台 ----------
+    for j, seg in enumerate(sorted(aud_segs, key=lambda s: int(s.get('start', 0)))):
+        if not seg.get('audio_b64'):
+            continue
+        try:
+            araw = base64.b64decode(seg['audio_b64'])
+            amime = seg.get('audio_mime', 'audio/wav')
+            aext = 'mp3' if 'mp3' in amime else ('flac' if 'flac' in amime else 'wav')
+            afile = comfy_upload_file(araw, f"sbaud_{int(time.time()*1000)}_{j}.{aext}")
+            uploaded_names.append(afile)
+            a_start = int(seg.get('start', 0))
+            audio_segments.append({
+                'id': f'aud{j}_{random.randint(1000,9999)}',
+                'type': 'audio',
+                'start': a_start + _shift_for(a_start),   # 跟随转场段顺延，保持图音对齐
+                'length': int(seg.get('length', 90)),
+                'trimStart': int(seg.get('trimStart', 0)),
+                'audioFile': afile, 'fileName': afile,
+            })
+        except Exception as e:
+            print(f'[YUSU] 第{j+1}个音频段上传失败: {e}')
+
+    max_end = max([int(s['start']) + int(s['length']) for s in timeline_segments] +
+                  [int(s['start']) + int(s['length']) for s in audio_segments] + [0])
+    base_total = int(params.get('total_frames') or 0) + cumulative_shift
+    total_frames = max(base_total, max_end, 1)
+
+    # use_custom_audio 跟随是否有音频段（未显式指定时）
+    use_custom_audio = params.get('use_custom_audio')
+    if use_custom_audio is None:
+        use_custom_audio = len(audio_segments) > 0
+
+    # global_prompt 按需求留空；motion 运动轨首版留空
+    timeline_obj = {
+        'mainTrackEnabled': True,
+        'audioTrackEnabled': True,
+        'motionTrackEnabled': True,
+        'showFilenames': True,
+        'overrideAudio': False,
+        'inpaint_audio': False,
+        'global_prompt': '',
+        'retake_global_prompt': '',
+        'retakeMode': False,
+        'normalStartFrame': 0,
+        'normalDurationFrames': total_frames,
+        'segments': timeline_segments,
+        'motionSegments': [],
+        'audioSegments': audio_segments,
+    }
+    timeline_data = json.dumps(timeline_obj, ensure_ascii=False)
+
+    _vw, _vh, _vres_label = _parse_video_resolution(params.get('resolution'))
+
+    # 注入 YusuLTXDirector 节点
+    injected = False
+    for nid, node in workflow.items():
+        if node.get('class_type') == 'YusuLTXDirector':
+            inp = node['inputs']
+            inp['timeline_data'] = timeline_data
+            inp['local_prompts'] = " | ".join((lp or '画面') for lp in local_prompts)
+            inp['segment_lengths'] = ",".join(seg_lengths)
+            inp['epsilon'] = float(params.get('epsilon', 0.3))
+            # guide_strength：每段引导图约束强度，钳制到 max_guide_strength（默认 1.0）
+            max_gs = float(params.get('max_guide_strength', 1.0))
+            raw_gs = str(params.get('guide_strength', '') or '')
+            if raw_gs.strip():
+                clamped = []
+                for x in raw_gs.split(','):
+                    x = x.strip()
+                    if not x:
+                        continue
+                    try:
+                        clamped.append(f"{min(float(x), max_gs):.2f}")
+                    except ValueError:
+                        clamped.append(f"{max_gs:.2f}")
+                inp['guide_strength'] = ",".join(clamped) if clamped else f"{max_gs:.2f}"
+            else:
+                inp['guide_strength'] = f"{max_gs:.2f}"
+            inp['use_custom_audio'] = bool(use_custom_audio)
+            inp['use_custom_motion'] = False   # 运动轨首版留空
+            inp['frame_rate'] = fps
+            # 帧/秒区间字段同步，避免节点用 JSON 里残留的旧值
+            inp['start_frame'] = 0
+            inp['end_frame'] = total_frames
+            inp['duration_frames'] = total_frames
+            inp['start_second'] = 0
+            inp['duration_seconds'] = round(total_frames / fps, 2)
+            # 分辨率：仅当节点本就含该字段时写入
+            if 'custom_width' in inp and not isinstance(inp.get('custom_width'), list):
+                inp['custom_width'] = _vw
+            if 'custom_height' in inp and not isinstance(inp.get('custom_height'), list):
+                inp['custom_height'] = _vh
+            injected = True
+            print(f"[Yusu] frames={total_frames} fps={fps} resolution={_vres_label} use_audio={use_custom_audio}")
+            break
+    if not injected:
+        comfy_cleanup_input_files(uploaded_names)
+        return {'success': False, 'error': 'Yusu 工作流中未找到 YusuLTXDirector 节点'}
+
+    try:
+        try:
+            found, _ = comfy_run_and_wait(
+                workflow, want_kinds=('gifs', 'images', 'audio'), max_wait=3600,
+                on_prompt_id=(lambda pid: _sb_job_set(task_id, prompt_id=pid)) if task_id else None,
+                should_cancel=(lambda: _sb_job_cancelled(task_id)) if task_id else None,
+            )
+        except JobCancelled:
+            return {'success': False, 'cancelled': True, 'error': '已打断'}
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
+        item = None
+        for key in ('gifs', 'images', 'audio'):
+            if found.get(key):
+                item = found[key][0]; break
+        if not item:
+            return {'success': False, 'error': 'Yusu 导演台未产出视频'}
+        content = comfy_fetch_view(item.get('filename', ''), item.get('subfolder', ''), item.get('type', 'output'))
+        if not content:
+            return {'success': False, 'error': '无法取回视频文件'}
+        vpath = comfy_output_abspath(item.get('filename', ''), item.get('subfolder', ''), item.get('type', 'output'))
+        return {'success': True, 'video_base64': base64.b64encode(content).decode('utf-8'),
+                'mime': 'video/mp4', 'frames': total_frames,
+                'video_file': vpath, 'video_name': item.get('filename', '')}
+    finally:
+        comfy_cleanup_input_files(uploaded_names)
+
+
 # ==================== HTTP Handler ====================
 
 class Handler(BaseHTTPRequestHandler):
@@ -2372,7 +2610,7 @@ class Handler(BaseHTTPRequestHandler):
                 'guide_strength': d.get('guide_strength', '1.00'),
                 'use_custom_audio': d.get('use_custom_audio', None),
                 'fps': d.get('fps', 30),
-                # 选择导演台工作流：'director'(默认，旧 LTXDirector) | 'singularity'(乱神版 V3)
+                # 选择导演台工作流：'director'(默认，旧 LTXDirector) | 'singularity'(乱神版 V3) | 'yusu'(Yusu 导演台)
                 'workflow': (d.get('workflow') or 'director'),
                 # 生成视频分辨率（格式「宽 x 高 (比例)」），由各工作流 runner 注入对应节点
                 'resolution': (d.get('resolution') or '1280 x 720 (16:9)'),
@@ -2382,7 +2620,13 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({'success': False, 'error': '缺少分镜段'}, 400); return
             def _director_worker(tid, p):
                 _sb_job_set(tid, status='running')
-                runner = run_director_singularity_sync if (p.get('workflow') == 'singularity') else run_director_sync
+                wf = p.get('workflow')
+                if wf == 'singularity':
+                    runner = run_director_singularity_sync
+                elif wf == 'yusu':
+                    runner = run_director_yusu_sync
+                else:
+                    runner = run_director_sync
                 r = runner(p, task_id=tid)
                 if r.get('success'):
                     _sb_job_set(tid, status='done', result=r)

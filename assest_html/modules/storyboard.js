@@ -4215,10 +4215,11 @@ emotions: this._collectEmotions(),
                     <span class="sb-dir-sep"></span>
                     <span class="sb-dir-guide sb-dir-selwrap">合成工作流
                         <span class="sb-dir-select">
-                            <select id="tlWorkflow" onchange="StoryboardModule.tlSetWorkflow(this.value)">
+<select id="tlWorkflow" onchange="StoryboardModule.tlSetWorkflow(this.value)">
 <option value="director" ${(tl.workflow || 'director') === 'director' ? 'selected' : ''}>旧导演台 LTXDirector</option>
-                            <option value="singularity" ${tl.workflow === 'singularity' ? 'selected' : ''}>Singularity 乱神版V3</option>
-                            </select>
+<option value="singularity" ${tl.workflow === 'singularity' ? 'selected' : ''}>Singularity 乱神版V3</option>
+<option value="yusu" ${tl.workflow === 'yusu' ? 'selected' : ''}>Yusu 导演台</option>
+</select>
                         </span>
                     </span>
                 </div>
@@ -4649,10 +4650,10 @@ tlSetUseAudio(checked) {
 this._tl.useCustomAudio = !!checked;
 this._tl._audioUserSet = true;   // 标记用户手动设置过：之后切换工作流不再自动覆盖
 },
-    tlSetWorkflow(v) {
-        // 导演台工作流选择：'director'(默认) | 'singularity'
-        const tl = this._tl;
-        tl.workflow = (v === 'singularity') ? 'singularity' : 'director';
+  tlSetWorkflow(v) {
+// 导演台工作流选择：'director'(默认) | 'singularity' | 'yusu'
+const tl = this._tl;
+tl.workflow = (v === 'singularity' || v === 'yusu') ? v : 'director';
             // 「使用音频」两个工作流均默认关闭；仅当用户未手动改过该开关时才同步默认值，避免覆盖用户的显式选择。
             if (!tl._audioUserSet) {
                 tl.useCustomAudio = false;
@@ -5126,10 +5127,11 @@ this._tl._audioUserSet = true;   // 标记用户手动设置过：之后切换�
                     <label class="sb-dir-selwrap" style="display:flex;align-items:center;gap:.5rem">
                         <span style="white-space:nowrap">合成工作流</span>
                         <span class="sb-dir-select" style="flex:1">
-                            <select id="sbGenConfirmWf" style="width:100%">
-                                <option value="director" ${cur === 'director' ? 'selected' : ''}>旧导演台 LTXDirector</option>
-                                <option value="singularity" ${cur === 'singularity' ? 'selected' : ''}>Singularity 乱神版V3</option>
-                            </select>
+<select id="sbGenConfirmWf" style="width:100%">
+<option value="director" ${cur === 'director' ? 'selected' : ''}>旧导演台 LTXDirector</option>
+<option value="singularity" ${cur === 'singularity' ? 'selected' : ''}>Singularity 乱神版V3</option>
+<option value="yusu" ${cur === 'yusu' ? 'selected' : ''}>Yusu 导演台</option>
+</select>
                         </span>
                     </label>
                     <p style="margin:.75rem 0 0;font-size:.82rem;color:var(--text-secondary,#888)">提示：默认工作流可在「设置」中修改。</p>
@@ -5150,9 +5152,9 @@ this._tl._audioUserSet = true;   // 标记用户手动设置过：之后切换�
     // 读取确认框里选定的工作流 → 写回时间轴（含下拉同步）→ 关闭浮层 → 真正提交
     _doConfirmGenVideo() {
         const sel = document.getElementById('sbGenConfirmWf');
-        if (sel && this._tl) {
-            const wf = (sel.value === 'singularity') ? 'singularity' : 'director';
-            this._tl.workflow = wf;
+if (sel && this._tl) {
+const wf = (sel.value === 'singularity' || sel.value === 'yusu') ? sel.value : 'director';
+this._tl.workflow = wf;
             // 同步时间轴工具栏里的工作流下拉，保持显示一致
             const tlSel = document.getElementById('tlWorkflow');
             if (tlSel) tlSel.value = wf;
