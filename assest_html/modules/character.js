@@ -279,6 +279,7 @@ const CharacterModule = {
                             <span class="meta-label">音色</span>
                             <div class="meta-item-btns">
                                 <button class="btn-ghost btn-tiny ${ttsTask ? 'btn-disabled' : ''}" id="ttsGenListBtn_${c.id}" onclick="${ttsTask ? '' : `CharacterModule.showTtsModal('${c.id}')`}">${ttsTask ? `<span id="ttsTime_${c.id}">⏳ ${ttsElapsedSec}s</span>` : '🔊 生成'}</button>
+                                <button class="btn-ghost btn-tiny" onclick="CharacterModule.uploadAudio('${c.id}')" title="上传本地音频作为该人物的音色参考（wav/mp3/flac），与生成的音频共用历史">📁 上传</button>
                                 ${au ? `<button class="btn-play btn-tiny" id="ab_${c.id}" onclick="CharacterModule.toggleAudio('${c.id}')">▶ 播放</button>` : ''}
                                 ${au ? `<span class="audio-history-link" onclick="CharacterModule.showAudioHistory('${c.id}')">历史</span>` : ''}
                                 ${au ? App.audioDragHandle(Storage.mediaUrl(au.data), `${this.esc(c.name || '音色')}.${(au.mime||'').includes('mpeg')?'mp3':(au.mime||'').includes('flac')?'flac':'wav'}`) : ''}
@@ -732,6 +733,41 @@ const CharacterModule = {
         if (genBtn) genBtn.textContent = '⏳ 生成中…';
     },
     uploadImage(cid) { const inp = document.createElement('input'); inp.type = 'file'; inp.accept = 'image/*'; inp.onchange = async e => { const f = e.target.files[0]; if (!f) return; const r = new FileReader(); r.onload = async ev => { const d = ev.target.result; const dims = await CharacterModule.computeDims(d); await Storage.addCharacterImage(CharacterModule.projectId, cid, d, dims); App.showToast('已上传', 'success'); this.render(this.projectId); }; r.readAsDataURL(f); }; inp.click(); },
+
+    // 📁 上传本地音频作为人物音色：与 TTS 生成的音频共用历史/选中机制（addCharacterAudio）。
+    // 支持 wav/mp3/flac，自动按文件类型推断 mime；上传后自动选为当前音色。
+    uploadAudio(cid) {
+        const inp = document.createElement('input');
+        inp.type = 'file';
+        inp.accept = 'audio/*,.wav,.mp3,.flac,.m4a,.ogg';
+        inp.onchange = async e => {
+            const f = e.target.files[0];
+            if (!f) return;
+            // 推断 mime：优先用文件自带 type，否则按扩展名兜底
+            let mime = f.type || '';
+            if (!mime) {
+                const ext = (f.name.split('.').pop() || '').toLowerCase();
+                mime = ext === 'mp3' ? 'audio/mpeg'
+                    : ext === 'flac' ? 'audio/flac'
+                    : ext === 'm4a' ? 'audio/mp4'
+                    : ext === 'ogg' ? 'audio/ogg'
+                    : 'audio/wav';
+            }
+            const r = new FileReader();
+            r.onload = async ev => {
+                try {
+                    await Storage.addCharacterAudio(CharacterModule.projectId, cid, ev.target.result, mime);
+                    App.showToast('已上传音色', 'success');
+                    this.render(this.projectId);
+                } catch (err) {
+                    App.showToast('❌ 上传失败：' + (err.message || '未知错误'), 'error');
+                }
+            };
+            r.onerror = () => App.showToast('❌ 音频读取失败', 'error');
+            r.readAsDataURL(f);
+        };
+        inp.click();
+    },
 
     // ===== 通用拖拽上传（人物 / 道具 / 场景图像卡片共用）=====
     // 在 App.init 时调用一次：document 级事件委托，对 tabContent 内所有
