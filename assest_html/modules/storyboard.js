@@ -925,10 +925,47 @@ const StoryboardModule = {
         // 画面提示语（独立字段 g.imgPrompt）：已填过用它；否则用「@图1/@图2 + 拼入 local 提示语」的默认文案
         const promptVal = (g.imgPrompt && g.imgPrompt.trim()) ? g.imgPrompt : this._defaultImgPrompt(g);
 
+        // 顶部「默认 API 分组 / 模型 / 尺寸 / 画质」（与四宫格生成弹窗一致，默认取设置，可临时修改）
+        const s = Storage.getSettings();
+        const groups = s.imageApiGroups || [];
+        const defs = s.imageDefaults || {};
+        if (!groups.length) { App.showToast('请先在设置中配置图像 API', 'error'); return; }
+        // 优先用该单分镜上次选过的分组（g.genCfg.groupId），否则用全局默认分组
+        const cfg = g.genCfg || {};
+        const activeGroup = groups.find(gr => gr.id === (cfg.groupId || defs.activeGroupId || groups[0].id)) || groups[0];
+        this._sgGroups = groups;
+        const models = activeGroup.models || ['gpt-image-2'];
+        const defModel = (cfg.model && models.includes(cfg.model)) ? cfg.model : (models.find(m => /image/i.test(m)) || models[0]);
+        const curSize = cfg.size || defs.size || 'auto';
+        const curQuality = cfg.quality || defs.quality || 'auto';
+
         const mc = document.getElementById('modalContent');
         mc.innerHTML = `
             <div class="modal-header"><h2 class="modal-title">🎨 生成单分镜图</h2><button class="modal-close" onclick="App.closeModal()">×</button></div>
             <div class="modal-body sb-pick-body">
+                <div class="form-row sb-fg-cfg-row">
+                    <div class="form-col"><label class="form-label">API 分组</label>
+                        <select class="form-input" id="sgGroup" onchange="StoryboardModule._onSgGroupChange()">
+                            ${groups.map(gr => `<option value="${gr.id}" ${gr.id === activeGroup.id ? 'selected' : ''}>${this.esc(gr.name)}</option>`).join('')}
+                        </select>
+                    </div>
+                    <div class="form-col"><label class="form-label">模型</label>
+                        <select class="form-input" id="sgModel">
+                            ${models.map(m => `<option value="${m}" ${m === defModel ? 'selected' : ''}>${m}</option>`).join('')}
+                        </select>
+                    </div>
+                    <div class="form-col"><label class="form-label">尺寸</label>
+                        <select class="form-input" id="sgSize">
+                            ${this._sizeOpts(curSize)}
+                        </select>
+                    </div>
+                    <div class="form-col"><label class="form-label">画质</label>
+                        <select class="form-input" id="sgQuality">
+                            ${['auto', 'low', 'medium', 'high'].map(v => `<option value="${v}" ${v === curQuality ? 'selected' : ''}>${v}</option>`).join('')}
+                        </select>
+                    </div>
+                </div>
+                <p class="form-hint" style="margin:-0.3rem 0 0.2rem">API 分组 / 模型 / 尺寸 / 画质默认取自设置，可在此临时调整（仅对本次生成生效并记住）。</p>
                 <div class="form-group">
                     <label class="form-label">画面提示语</label>
                     <textarea class="form-textarea" id="singleGenPrompt" style="min-height:90px" placeholder="描述要生成的画面…">${this.esc(promptVal)}</textarea>
@@ -980,9 +1017,10 @@ const StoryboardModule = {
     // 「添加参考图」：打开统一图选弹窗（多选，已在清单里的默认勾选），确定后并回清单（保留提示语）。
     _sgAddRef() {
         const ctx = this._sgCtx; if (!ctx) return;
-        // 先把当前提示语暂存，避免切弹窗后丢失
+        // 先把当前提示语 + 顶部配置暂存，避免切弹窗后丢失
         const ta = document.getElementById('singleGenPrompt');
         if (ta) ctx.prompt = ta.value;
+        ctx.cfg = this._readSgCfg();
         const all = this._allImageAssets();
         if (!all.length) { App.showToast('暂无可选图像，请先在人物/道具/场景页生成图，或生成四宫格切分图', 'info'); return; }
         const blocks = this._groupAssetsBySb(all);
@@ -1018,8 +1056,49 @@ const StoryboardModule = {
             const ta = document.getElementById('singleGenPrompt');
             if (ta) ta.value = ctx.prompt;
         }
+        // 还原顶部配置（分组/模型/尺寸/画质）
+        if (ctx.cfg) this._applySgCfg(ctx.cfg);
         const host = document.getElementById('singleGenRefList');
         if (host) host.innerHTML = this._renderSingleGenRefs();
+    },
+
+    // 读取单分镜生成弹窗顶部配置（分组/模型/尺寸/画质）
+    _readSgCfg() {
+        const gEl = document.getElementById('sgGroup');
+        const mEl = document.getElementById('sgModel');
+        const sEl = document.getElementById('sgSize');
+        const qEl = document.getElementById('sgQuality');
+        return {
+            groupId: gEl ? gEl.value : '',
+            model: mEl ? mEl.value : '',
+            size: sEl ? sEl.value : 'auto',
+            quality: qEl ? qEl.value : 'auto',
+        };
+    },
+
+    // 把暂存配置还原到弹窗控件（分组变化后先刷新模型下拉再选中）
+    _applySgCfg(cfg) {
+        if (!cfg) return;
+        const gEl = document.getElementById('sgGroup');
+        if (gEl && cfg.groupId) { gEl.value = cfg.groupId; this._onSgGroupChange(); }
+        const mEl = document.getElementById('sgModel');
+        if (mEl && cfg.model && Array.from(mEl.options).some(o => o.value === cfg.model)) mEl.value = cfg.model;
+        const sEl = document.getElementById('sgSize');
+        if (sEl && cfg.size) sEl.value = cfg.size;
+        const qEl = document.getElementById('sgQuality');
+        if (qEl && cfg.quality) qEl.value = cfg.quality;
+    },
+
+    // 分组变化 → 刷新模型下拉（与四宫格 _onFgGroupChange 同款）
+    _onSgGroupChange() {
+        const sgGroupEl = document.getElementById('sgGroup');
+        if (!sgGroupEl) return;
+        const group = (this._sgGroups || []).find(g => g.id === sgGroupEl.value);
+        const sel = document.getElementById('sgModel');
+        if (!sel) return;
+        const models = (group && group.models) ? group.models : ['gpt-image-2'];
+        const defModel = models.find(m => /image/i.test(m)) || models[0];
+        sel.innerHTML = models.map(m => `<option value="${m}" ${m === defModel ? 'selected' : ''}>${m}</option>`).join('');
     },
 
     // 弹窗「开始生成」：保存画面提示语（独立字段 g.imgPrompt，不覆盖 local 提示语 g.prompt）+ 清单参考图，关弹窗后调用生成。
@@ -1033,6 +1112,8 @@ const StoryboardModule = {
         const ctx = this._sgCtx || { refs: [] };
         g.imgPrompt = prompt;
         g.refImageIds = (ctx.refs || []).slice();
+        // 记住本次选的 API 分组/模型/尺寸/画质（下次打开弹窗默认沿用，生图时使用）
+        g.genCfg = this._readSgCfg();
         Storage.updateProject(this.projectId, { storyboardGroups: p.storyboardGroups });
         App.closeModal();
         await this.genSingleImage(gid);
@@ -1103,11 +1184,14 @@ const StoryboardModule = {
             if (!ok) return;
         }
 
-        // API 分组：复用图像设置里的默认分组
-        const groupsCfg = (Storage.getSettings().imageGroups || []);
-        const activeGroup = groupsCfg.find(x => x.active) || groupsCfg[0];
-        if (!activeGroup) { App.showToast('请先在设置里配置图像 API 分组', 'error'); return; }
-        const defs = (Storage.getSettings().imageDefaults || {});
+        // API 分组：优先用本单分镜在生成弹窗里选过的配置（g.genCfg），否则用设置里的默认分组。
+        // 注意：正确字段为 imageApiGroups + imageDefaults.activeGroupId（之前误用 imageGroups/x.active，会取不到分组）。
+        const sSet = Storage.getSettings();
+        const groupsCfg = sSet.imageApiGroups || [];
+        const defs = sSet.imageDefaults || {};
+        if (!groupsCfg.length) { App.showToast('请先在设置里配置图像 API', 'error'); return; }
+        const cfg = g.genCfg || {};
+        const activeGroup = groupsCfg.find(gr => gr.id === (cfg.groupId || defs.activeGroupId || groupsCfg[0].id)) || groupsCfg[0];
 
         try {
             const submit = await API.post('/api/storyboard/fourgrid', {
@@ -1115,9 +1199,9 @@ const StoryboardModule = {
                 ref_images: refB64,
                 api_url: activeGroup.url,
                 api_key: activeGroup.apiKey,
-                model: (activeGroup.models && activeGroup.models.find(m => /image/i.test(m))) || 'gpt-image-2',
-                size: defs.size || 'auto',
-                quality: defs.quality || 'auto',
+                model: cfg.model || (activeGroup.models && activeGroup.models.find(m => /image/i.test(m))) || 'gpt-image-2',
+                size: cfg.size || defs.size || 'auto',
+                quality: cfg.quality || defs.quality || 'auto',
             });
             if (!submit.success || !submit.task_id) throw new Error(submit.error || '提交失败');
             this._polls['si_img_' + gid] = submit.task_id;
