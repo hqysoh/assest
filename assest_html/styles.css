@@ -568,6 +568,23 @@ input[type="checkbox"]{accent-color:var(--ac)}
 .sb-pick-cell.selected{border-color:var(--ac);background:var(--tag-cc-bg)}
 .sb-pick-cell input[type=checkbox]{position:absolute;top:4px;left:4px;width:16px;height:16px;z-index:2}
 .sb-pick-cell img{width:100%;height:72px;object-fit:cover;border-radius:5px;display:block}
+/* 历史图选择：删除按钮（右上角，hover 显示）+ 拖动状态 */
+.sb-pick-cell{cursor:grab}
+.sb-pick-cell:active{cursor:grabbing}
+.sb-pick-del{position:absolute;top:3px;right:3px;z-index:6;width:18px;height:18px;line-height:16px;
+text-align:center;border:none;border-radius:50%;background:rgba(0,0,0,.55);color:#fff;font-size:13px;
+font-weight:700;cursor:pointer;padding:0;opacity:0;transition:opacity .15s,background .15s}
+.sb-pick-cell:hover .sb-pick-del{opacity:1}
+.sb-pick-del:hover{background:var(--danger,#ef4444)}
+.sb-pick-cell.sb-pick-dragging{opacity:0.4}
+.sb-pick-cell.sb-pick-drop-target{outline:2px dashed var(--ac);outline-offset:2px}
+/* 拖动排序时，在「将插入的两张图之间」显示一条竖线光标（左半→插到该格前，右半→插到该格后） */
+.sb-pick-cell.sb-pick-insert-before::before,
+.sb-pick-cell.sb-pick-insert-after::after{content:'';position:absolute;top:6%;height:88%;width:3px;border-radius:3px;
+background:var(--ac);box-shadow:0 0 6px 1px var(--ac);z-index:8;pointer-events:none;animation:sbInsertBlink .8s ease-in-out infinite}
+.sb-pick-cell.sb-pick-insert-before::before{left:-5px}
+.sb-pick-cell.sb-pick-insert-after::after{right:-5px}
+@keyframes sbInsertBlink{0%,100%{opacity:1}50%{opacity:0.45}}
 .sb-pick-name{font-size:0.66rem;color:var(--t2);text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
 .sb-pick-audio-list{display:flex;flex-direction:column;gap:0.45rem}
 .sb-pick-audio-row{display:flex;align-items:center;gap:0.6rem;border:2px solid var(--bd);border-radius:8px;padding:0.45rem 0.6rem;cursor:pointer;transition:all .15s}
@@ -1002,6 +1019,30 @@ line-height:1.2;transition:border-color .18s,box-shadow .18s,background .18s;min
 .sb-dir-prev-talk-icon{font-size:0.8rem;flex-shrink:0}
 .sb-dir-prev-talk-text{flex:1;min-width:0;font-size:0.74rem;font-weight:600;color:#1f2430;
     line-height:1.45;word-break:break-word}
+/* 当前段「引导图（多图关键帧）」管理区 */
+.sb-guide-box{padding:0.55rem 0.8rem;border-bottom:1px solid var(--bd);background:rgba(124,130,255,.04)}
+.sb-guide-head{display:flex;align-items:center;justify-content:space-between;gap:0.5rem;margin-bottom:0.45rem}
+.sb-guide-title{font-size:0.74rem;font-weight:700;color:var(--ac,#7c82ff)}
+.sb-guide-list{display:flex;flex-wrap:wrap;gap:0.5rem;align-items:flex-start}
+.sb-guide-empty{font-size:0.72rem;color:var(--t3,#888)}
+.sb-guide-item{position:relative;width:76px;display:flex;flex-direction:column;align-items:center;gap:0.2rem}
+.sb-guide-item>img{width:76px;height:76px;object-fit:cover;border-radius:6px;border:1px solid var(--bd);display:block;cursor:zoom-in;transition:border-color .12s,transform .12s}
+.sb-guide-item>img:hover{border-color:var(--ac,#7c82ff);transform:scale(1.04)}
+.sb-guide-count{margin-left:0.4rem;font-size:0.62rem;font-weight:600;color:var(--t2,#aaa);background:rgba(124,130,255,.16);border-radius:8px;padding:1px 7px}
+.sb-guide-zoom-meta{display:flex;align-items:center;justify-content:center;gap:0.8rem;margin-top:0.5rem;font-size:0.74rem;color:var(--t2,#aaa)}
+.sb-guide-zoom-name{max-width:60%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sb-guide-zoom-dur{color:var(--ac,#7c82ff);font-weight:600}
+.sb-guide-noimg{width:76px;height:76px;border-radius:6px;border:1px dashed var(--bd);display:flex;align-items:center;justify-content:center;font-size:0.62rem;color:var(--t3,#888)}
+.sb-guide-idx{position:absolute;top:2px;left:2px;z-index:2;min-width:16px;height:16px;line-height:16px;text-align:center;
+    background:var(--ac,#7c82ff);color:#fff;font-size:0.6rem;font-weight:700;border-radius:8px;padding:0 4px}
+.sb-guide-del{position:absolute;top:2px;right:2px;z-index:2;width:16px;height:16px;line-height:14px;text-align:center;
+    background:rgba(0,0,0,.55);color:#fff;border:none;border-radius:50%;cursor:pointer;font-size:0.7rem;padding:0}
+.sb-guide-del:hover{background:var(--danger,#ef4444)}
+.sb-guide-dur{display:flex;align-items:center;gap:1px;font-size:0.62rem;color:var(--t2,#aaa)}
+.sb-guide-dur>input{width:38px;padding:1px 3px;font-size:0.66rem;border:1px solid var(--bd);border-radius:4px;
+    background:var(--card-solid,#1c1f2b);color:inherit;text-align:center}
+.sb-guide-hint{margin-top:0.4rem;font-size:0.62rem;color:var(--t3,#888);line-height:1.4}
+
 /* 预览区下方 local 提示词编辑框（美化版） */
 .sb-dir-prev-prompt{padding:0.7rem 0.8rem 0.8rem;background:linear-gradient(180deg,rgba(124,130,255,.06),var(--card-solid,#1c1f2b))}
 .sb-dir-prev-phead{display:flex;align-items:center;justify-content:space-between;margin-bottom:0.45rem}
@@ -1432,13 +1473,18 @@ border:1px solid var(--bd);border-radius:9px;padding:0.55rem 0.7rem;background:v
     color:var(--t1);margin-bottom:0.55rem}
 .sb-hist-block-title .sb-hist-block-tag{font-size:0.64rem;font-weight:700;padding:0.08rem 0.45rem;
 border-radius:8px;background:var(--grad-soft);color:var(--ac2);border:1px solid var(--bd)}
-/* 分镜历史按行展示：每行严格 5 张（第 1 张四宫格 + 4 张切分），永不换行，列宽可随弹窗缩小 */
-.sb-pick-row{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:0.4rem;margin-bottom:0.5rem;align-items:start}
+/* 分镜历史按行展示：每行最多 5 张，永不换行，列宽可随弹窗缩小 */
+.sb-pick-row{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:0.4rem;margin-bottom:0.6rem;align-items:start}
 /* 行内 cell 缩小内边距，避免 5 张挤压时溢出；图片随列宽自适应、按比例缩小 */
 .sb-pick-row .sb-pick-cell{padding:0.25rem;min-width:0}
 .sb-pick-row .sb-pick-cell img{width:100%;height:auto;aspect-ratio:1/1;object-fit:cover}
 .sb-pick-row .sb-pick-name{font-size:0.6rem}
-.sb-pick-row .sb-pick-cell:first-child{border-color:var(--ac2);box-shadow:0 0 0 1px var(--ac2) inset}
+/* 发光框：把同一组（每行 5 张）整行框起来，作为一组关联图。整行一个发光边框，不单独高亮某一格。 */
+.sb-pick-row-glow{position:relative;padding:0.55rem;border-radius:12px;border:2px solid var(--ac2);
+background:var(--grad-soft);box-shadow:0 0 0 1px var(--ac2) inset,0 0 14px 2px color-mix(in srgb,var(--ac2) 55%,transparent);
+animation:sbPickGlow 2.4s ease-in-out infinite}
+@keyframes sbPickGlow{0%,100%{box-shadow:0 0 0 1px var(--ac2) inset,0 0 10px 1px color-mix(in srgb,var(--ac2) 45%,transparent)}
+50%{box-shadow:0 0 0 1px var(--ac2) inset,0 0 18px 4px color-mix(in srgb,var(--ac2) 70%,transparent)}}
 /* 替换某格的历史画廊：每行严格 4 张切分图（不显示完整四宫格大图），点击整卡即替换 */
 .sb-hist-row{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:0.5rem;margin-bottom:0.5rem;align-items:start}
 .sb-hist-row .gallery-item{min-width:0}
@@ -1493,3 +1539,11 @@ color:var(--t2);font-size:0.62rem;cursor:pointer;display:flex;align-items:center
 .sb-exp-neighbor-tag{position:absolute;left:0;right:0;bottom:0;font-size:0.56rem;line-height:1.3;
 padding:1px 3px;background:rgba(0,0,0,0.6);color:#fff;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .sb-exp-ref-empty{display:flex;align-items:center;justify-content:center;border-style:dashed}
+
+
+/* ===== 内嵌单分镜（插在四宫格 local 行之间，不同底色 + 可删除） ===== */
+.sb-local-insert{width:60px;padding:0.12rem 0;font-size:0.62rem;line-height:1.2;text-align:center;white-space:nowrap}
+.sb-inline-single{position:relative;margin:0.4rem 0 0.4rem 0;padding:0.2rem 0 0.2rem 0.6rem;border-left:3px dashed var(--ac);background:color-mix(in srgb, var(--ac) 8%, transparent);border-radius:8px}
+.sb-inline-single-tag{font-size:0.66rem;color:var(--ac);font-weight:600;padding:0.1rem 0.4rem;opacity:0.85}
+.sb-inline-single .sb-single-row{border-left:none;margin:0;background:transparent;box-shadow:none}
+.sb-inline-single .list-row{background:transparent}
