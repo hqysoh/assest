@@ -349,7 +349,8 @@ const CharacterModule = {
         }, 1000);
 
         try {
-            const r = await fetch(API.url('/api/generate_voice'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ character_name: c.name, voice_desc: voiceDesc, project_id: this.projectId, text: ttsText, task_id: Date.now().toString() }) });
+            const designWorkflow = (Storage.getSettings().voiceSettings || {}).designWorkflow || 'qwen3';
+            const r = await fetch(API.url('/api/generate_voice'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ character_name: c.name, voice_desc: voiceDesc, project_id: this.projectId, text: ttsText, task_id: Date.now().toString(), voice_design_workflow: designWorkflow }) });
             const d = await r.json();
             clearInterval(progressTimer);
             if (this._ttsTimers[cid]) { clearTimeout(this._ttsTimers[cid]); delete this._ttsTimers[cid]; }

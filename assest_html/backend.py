@@ -17,6 +17,13 @@ from socketserver import ThreadingMixIn
 
 COMFYUI_URL = "http://127.0.0.1:8188"
 TTS_WORKFLOW_PATH = os.path.join(os.path.dirname(__file__), "..", "workflow-api", "Qwen3-TD-TTS 语音设计.json")
+# VoxCPM2 语音设计工作流（备选，RunningHub_VoxCPM_Generate 节点 + 两个 CR Prompt Text）
+TTS_DESIGN_VOXCPM_WORKFLOW_PATH = os.path.join(os.path.dirname(__file__), "..", "workflow-api", "VoxCPM2-声音设计.json")
+# 语音设计（音色生成）工作流可选项：key → 文件路径（前端在设置中选择，默认 qwen3）
+VOICE_DESIGN_WORKFLOWS = {
+    'qwen3': TTS_WORKFLOW_PATH,
+    'voxcpm': TTS_DESIGN_VOXCPM_WORKFLOW_PATH,
+}
 
 BASE_DIR = os.path.dirname(__file__)
 DB_FILE = os.path.join(BASE_DIR, "data.db")
@@ -917,17 +924,37 @@ def generate_tts_sync(task):
     character_name = task['character_name']
     voice_desc = task['voice_desc']
     tts_text = task['text']
+    # 语音设计工作流：'qwen3'(默认，TDQwen3TTSVoiceDesign) | 'voxcpm'(RunningHub_VoxCPM_Generate)
+    design_wf = task.get('voice_design_workflow') or 'qwen3'
+    wf_path = VOICE_DESIGN_WORKFLOWS.get(design_wf, TTS_WORKFLOW_PATH)
+    if not os.path.exists(wf_path):
+        return {'success': False, 'error': f'未找到语音设计工作流文件: {os.path.basename(wf_path)}'}
 
-    with open(TTS_WORKFLOW_PATH, 'r', encoding='utf-8') as f:
+    with open(wf_path, 'r', encoding='utf-8') as f:
         workflow = json.load(f)
 
     rseed = random.randint(1, 2**31)
-    for node_id, node in workflow.items():
-        if node.get('class_type') == 'TDQwen3TTSVoiceDesign':
-            node['inputs']['text'] = tts_text
-            node['inputs']['instruct'] = voice_desc or "标准普通话，自然流畅"
-            node['inputs']['seed'] = rseed
-            break
+    if design_wf == 'voxcpm':
+        # VoxCPM2：control_instruction(音色描述) 与 text(朗读内容) 分别来自两个 CR Prompt Text 节点，
+        # 通过 _meta.title 区分（语言设计 = 音色描述；实际内容 = 朗读文本）；seed 写在 Generate 节点。
+        for node_id, node in workflow.items():
+            ct = node.get('class_type')
+            if ct == 'CR Prompt Text':
+                title = (node.get('_meta', {}) or {}).get('title', '')
+                if '设计' in title:
+                    node['inputs']['prompt'] = voice_desc or "标准普通话，自然流畅"
+                else:
+                    node['inputs']['prompt'] = tts_text
+            elif ct == 'RunningHub_VoxCPM_Generate':
+                node['inputs']['seed'] = rseed
+    else:
+        # Qwen3-TD-TTS 语音设计：单节点 TDQwen3TTSVoiceDesign
+        for node_id, node in workflow.items():
+            if node.get('class_type') == 'TDQwen3TTSVoiceDesign':
+                node['inputs']['text'] = tts_text
+                node['inputs']['instruct'] = voice_desc or "标准普通话，自然流畅"
+                node['inputs']['seed'] = rseed
+                break
 
     dirs = find_comfyui_dirs()
     before_files = set()
@@ -2431,6 +2458,8 @@ class Handler(BaseHTTPRequestHandler):
             voice_desc = d.get('voice_desc', '')
             tts_text = d.get('text', f"我是{char_name}，这是我的音色，很高兴认识你")
             task_id = d.get('task_id', str(int(time.time()*1000)))
+            # 语音设计工作流：'qwen3'(默认) | 'voxcpm'
+            design_wf = d.get('voice_design_workflow') or 'qwen3'
 
             if not char_name:
                 self.send_json({'success': False, 'error': '缺少人物名称'}, 500); return
@@ -2438,7 +2467,8 @@ class Handler(BaseHTTPRequestHandler):
             if tts_busy.locked():
                 self.send_json({'success': False, 'error': '正在处理其他任务，请稍后重试'}, 503); return
 
-            task = {'id': task_id, 'character_name': char_name, 'voice_desc': voice_desc, 'text': tts_text}
+            task = {'id': task_id, 'character_name': char_name, 'voice_desc': voice_desc, 'text': tts_text,
+                    'voice_design_workflow': design_wf}
             tts_queue.put(task)
 
             for _ in range(120):

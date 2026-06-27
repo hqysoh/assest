@@ -109,12 +109,19 @@ const SettingsModule = {
                     </select>
                 </div>
                 <div class="form-col">
+                    <label class="form-label">语音设计工作流（人物生成音色）</label>
+                    <select class="form-input" id="voiceDesignWorkflow" onchange="SettingsModule.saveVoiceDesignWorkflow(this.value)">
+                        <option value="qwen3" ${(voice.designWorkflow || 'qwen3') === 'qwen3' ? 'selected' : ''}>Qwen3-TD-TTS</option>
+                        <option value="voxcpm" ${voice.designWorkflow === 'voxcpm' ? 'selected' : ''}>VoxCPM2</option>
+                    </select>
+                </div>
+                <div class="form-col">
                     <label class="form-label">默认朗读文本模板</label>
                     <input class="form-input" id="voiceTemplate" value="${this.esc(voice.textTemplate || '我是{name}，这是我的音色，很高兴认识你')}" placeholder="我是{name}，这是我的音色"
                         onchange="SettingsModule.autoSaveVoice(this.value)">
                 </div>
             </div>
-            <p class="form-hint">配音工作流：人物 / 分镜配音使用的 ComfyUI 工作流，VoxCPM 与 Qwen3-TD-TTS 音色风格略有差异，IndexTTS-2 支持情感维度。朗读文本模板用 <code>{name}</code> 作为人物姓名占位符。</p>
+            <p class="form-hint">配音工作流：人物 / 分镜配音（语音克隆）使用的 ComfyUI 工作流，VoxCPM 与 Qwen3-TD-TTS 音色风格略有差异，IndexTTS-2 支持情感维度。语音设计工作流：人物「🔊 生成」音色时按描述生成声音所用的工作流（Qwen3-TD-TTS / VoxCPM2）。朗读文本模板用 <code>{name}</code> 作为人物姓名占位符。</p>
         </div>
 
         <div class="settings-section">
@@ -251,6 +258,15 @@ const SettingsModule = {
         const allow = ['vocpm', 'qwen3', 'indextts'];
         const cloneWorkflow = allow.includes(wf) ? wf : 'vocpm';
         Storage.saveSettings({ voiceSettings: { ...(s.voiceSettings || {}), cloneWorkflow } });
+        this.flashSaved();
+    },
+
+    // 语音设计工作流（人物生成音色）：支持 qwen3 / voxcpm
+    saveVoiceDesignWorkflow(wf) {
+        const s = Storage.getSettings();
+        const allow = ['qwen3', 'voxcpm'];
+        const designWorkflow = allow.includes(wf) ? wf : 'qwen3';
+        Storage.saveSettings({ voiceSettings: { ...(s.voiceSettings || {}), designWorkflow } });
         this.flashSaved();
     },
 
