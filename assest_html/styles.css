@@ -1431,7 +1431,10 @@ border:1px solid var(--bd);border-radius:9px;padding:0.55rem 0.7rem;background:v
 .sb-hist-block-title{display:flex;align-items:center;gap:0.45rem;font-size:0.86rem;font-weight:800;
     color:var(--t1);margin-bottom:0.55rem}
 .sb-hist-block-title .sb-hist-block-tag{font-size:0.64rem;font-weight:700;padding:0.08rem 0.45rem;
-    border-radius:8px;background:var(--grad-soft);color:var(--ac2);border:1px solid var(--bd)}
+border-radius:8px;background:var(--grad-soft);color:var(--ac2);border:1px solid var(--bd)}
+/* 分镜历史按行展示：每行最多 5 张（第 1 张四宫格 + 4 张切分） */
+.sb-pick-row{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:0.5rem;margin-bottom:0.5rem}
+.sb-pick-row .sb-pick-cell:first-child{border-color:var(--ac2);box-shadow:0 0 0 1px var(--ac2) inset}
 .sb-hist-sub{font-size:0.72rem;font-weight:700;color:var(--t2);margin:0.5rem 0 0.4rem;
     display:flex;align-items:center;gap:0.4rem}
 .sb-hist-sub::before{content:'';flex:1;height:1px;background:var(--bd)}
@@ -1454,3 +1457,13 @@ border:1px solid var(--bd);border-radius:9px;padding:0.55rem 0.7rem;background:v
 .sb-exp-origin{background:var(--bg3);border:1px solid var(--bd);border-radius:10px;padding:0.55rem 0.7rem;
     font-size:0.8rem;color:var(--t2);line-height:1.5;max-height:120px;overflow:auto}
 .sb-exp-actions{display:flex;align-items:center;gap:0.6rem;flex-wrap:wrap;margin-top:0.7rem}
+/* 扩展弹窗内参考图：已选缩略图（可×移除）+ 选择按钮 */
+.sb-exp-ref-list{display:flex;flex-wrap:wrap;gap:0.5rem;align-items:center}
+.sb-exp-ref-cell{position:relative;width:64px;height:64px;border:1px solid var(--bd);border-radius:8px;overflow:hidden;background:var(--bg3)}
+.sb-exp-ref-cell img{width:100%;height:100%;object-fit:cover;display:block}
+.sb-exp-ref-x{position:absolute;top:2px;right:2px;width:18px;height:18px;line-height:16px;text-align:center;
+border:none;border-radius:50%;background:rgba(0,0,0,0.62);color:#fff;font-size:0.8rem;cursor:pointer;padding:0}
+.sb-exp-ref-x:hover{background:#e5484d}
+.sb-exp-ref-add{width:64px;height:64px;border:1px dashed var(--bd);border-radius:8px;background:var(--bg3);
+color:var(--t2);font-size:0.62rem;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0 0.3rem;text-align:center}
+.sb-exp-ref-add:hover{border-color:var(--ac,#7c82ff);color:var(--ac,#7c82ff)}
