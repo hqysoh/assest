@@ -1023,7 +1023,8 @@ const StoryboardModule = {
             // 2) 收集参考图，严格按「图1=上一分镜末、图2=本面板图(当前关键帧)、图3=下一分镜首」的顺序发送，
             //    与 QUAD_INSTR_DEFAULT 指令里的「图1/图2/图3」语义对齐。
             const refB64 = [];
-            const { prevUrl, nextUrl } = this._neighborEdgeImages(p, gid);
+            // 面板扩展：图1/图3 取「组内相邻面板」（越界才跨分镜组），保证如面板1能取到本组面板2。
+            const { prevUrl, nextUrl } = this._panelNeighborImages(p, gid, i);
             // 图2·当前关键帧：本面板第 i 格切分图，没有则退用本组四宫格大图
             let curUrl = '';
             const panelMid = (g.panelImages || [])[i];
@@ -1273,7 +1274,10 @@ const StoryboardModule = {
         if (!wrap) return;
         const p = Storage.getProject(this.projectId);
         const g = (p.storyboardGroups || []).find(x => String(x.id) === String(gid));
-        const { prevUrl, nextUrl } = this._neighborEdgeImages(p, gid);
+        // 面板扩展用组内相邻面板衔接图；单分镜扩展用跨组分镜衔接图。与生图时取法一致。
+        const { prevUrl, nextUrl } = (panel != null)
+            ? this._panelNeighborImages(p, gid, panel)
+            : this._neighborEdgeImages(p, gid);
         // 当前分镜关键帧（图2）：与生图时的图2取法一致
         let curUrl = '';
         if (panel != null && g) {
@@ -1661,6 +1665,32 @@ const StoryboardModule = {
             prevUrl: pickEdge(groups[idx - 1], 'last'),
             nextUrl: pickEdge(groups[idx + 1], 'first'),
         };
+    },
+
+    // 面板扩展专用的前后衔接图：以「组内相邻面板」为主，越界才跨到相邻分镜组。
+    //   图1（prev）：本组上一格 panelImages[panel-1]；panel=0（第一格）→ 上一个分镜组的末图。
+    //   图3（next）：本组下一格 panelImages[panel+1]；panel 为最后一格 → 下一个分镜组的首图。
+    // 这样四宫格组里「面板1」扩展时，图3 能正确取到本组面板2（之前误取下一分镜组导致图3为空）。
+    _panelNeighborImages(p, gid, panel) {
+        const groups = p.storyboardGroups || [];
+        const g = groups.find(x => String(x.id) === String(gid));
+        const urlOf = (mid) => {
+            const m = mid != null ? Storage.getMediaById(this.projectId, mid) : null;
+            return m ? Storage.mediaUrl(m.data) : '';
+        };
+        const panels = (g && g.panelImages) || [];
+        const lastIdx = panels.length ? panels.length - 1 : 3;
+        // 跨组兜底（用组级相邻分镜的末/首图）
+        const { prevUrl: groupPrev, nextUrl: groupNext } = this._neighborEdgeImages(p, gid);
+        // 图1：组内上一格，越界（第一格）取上一分镜组末图
+        let prevUrl = '';
+        if (panel > 0) prevUrl = urlOf(panels[panel - 1]);
+        if (!prevUrl && panel <= 0) prevUrl = groupPrev;
+        // 图3：组内下一格，越界（最后一格）取下一分镜组首图
+        let nextUrl = '';
+        if (panel < lastIdx) nextUrl = urlOf(panels[panel + 1]);
+        if (!nextUrl && panel >= lastIdx) nextUrl = groupNext;
+        return { prevUrl, nextUrl };
     },
 
     // 从历史图像替换扩展四宫格的某一格面板
