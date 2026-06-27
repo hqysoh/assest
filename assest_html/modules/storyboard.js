@@ -490,19 +490,30 @@ const StoryboardModule = {
                 otherSb.push(a);
             }
         });
-        // 2a) 每个分镜：四宫格/切分图「按 mediaLibrary 的顺序」展示（即用户拖动后的顺序），不再强制按 id/panelIdx 重排，
-        //     这样拖动调整后的顺序会被如实保留并持久化（_allImageAssets 已按库顺序产出 all）。
+        // 2a) 每个分镜：每行严格 5 张、整行发光。
+        //     规则：① 有四宫格成品图(quad) 时，每个 quad 起一行放在「第一列」，后接它的 4 张切分图(panel)；
+        //          ② 没有 quad（或 quad 用完后剩余的 panel）时，切分图按每行 5 张排列、整行发光（首列就是切分图，不强求四宫格）。
+        //     在尊重 mediaLibrary 顺序（拖动结果）的前提下组织：quad/panel 各自保持库内相对顺序。
         Object.keys(byNo)
             .sort((x, y) => (+x) - (+y))
             .forEach(k => {
-                const list = byNo[k];   // 保持传入顺序（= mediaLibrary 顺序）
+                const list = byNo[k];                              // 库顺序（含拖动结果）
+                const quads = list.filter(a => a.sbKind === 'quad');   // 四宫格成品图，按库顺序
+                const panels = list.filter(a => a.sbKind === 'panel'); // 切分图，按库顺序
                 const rows = [];
-                for (let st = 0; st < list.length; st += 5) {
-                    rows.push({ cells: list.slice(st, st + 5), glow: true });
+                // ① 每个四宫格领头一行：首列 quad + 紧随的 4 张切分图（按库顺序每 4 张一组分配）
+                quads.forEach((q, qi) => {
+                    const group = panels.slice(qi * 4, qi * 4 + 4);
+                    rows.push({ cells: [q, ...group], glow: true });
+                });
+                // ② 剩余切分图（多于 quads×4，或本分镜无 quad）：每行 5 张、整行发光
+                const leftover = panels.slice(quads.length * 4);
+                for (let st = 0; st < leftover.length; st += 5) {
+                    rows.push({ cells: leftover.slice(st, st + 5), glow: true });
                 }
                 blocks.push({
                     title: `🎬 分镜${k}`,
-                    tag: '每行 5 张为一组',
+                    tag: quads.length ? '每行：四宫格 + 4 张切分' : '每行 5 张为一组',
                     items: list,
                     rows,
                 });
