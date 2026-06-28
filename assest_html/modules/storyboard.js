@@ -344,19 +344,34 @@ const StoryboardModule = {
 
         const nextLocal = this._nextLocalText(kind, gid, panel);
         const userPrompt = this._buildOptimizeUserPrompt(curLocal, nextLocal);
+        // 系统提示语：取设置里的「优化提示语」，因为不发整部剧本，这里把 {script} 占位（及其所在的「剧本背景参考」尾段）清理掉再展示
+        const sysPrompt = this._cleanOptimizeSysPrompt(llm.optimizePrompt || '');
 
         const mc = document.getElementById('modalContent');
         mc.innerHTML = `
             <div class="modal-header"><h2 class="modal-title">✨ 优化 local 提示语</h2><button class="modal-close" onclick="App.closeModal()">×</button></div>
             <div class="modal-body">
-                <p class="form-hint" style="margin-bottom:0.4rem">下面是将发送给大模型的完整内容（已带上「下一个分镜」作衔接参考，<b>不发整部剧本</b>）。可直接修改后再优化。</p>
-                <textarea class="form-textarea" id="optUserPrompt" style="min-height:220px;white-space:pre-wrap">${this.esc(userPrompt)}</textarea>
+                <p class="form-hint" style="margin-bottom:0.4rem">下面是将发送给大模型的完整内容（<b>不发整部剧本</b>）。系统提示语来自「设置」，可在此临时修改。</p>
+                <label class="form-label">系统提示语（来自设置）</label>
+                <textarea class="form-textarea" id="optSysPrompt" style="min-height:120px;white-space:pre-wrap">${this.esc(sysPrompt)}</textarea>
+                <label class="form-label" style="margin-top:0.5rem">用户内容（当前 + 下一条 local 作衔接参考）</label>
+                <textarea class="form-textarea" id="optUserPrompt" style="min-height:160px;white-space:pre-wrap">${this.esc(userPrompt)}</textarea>
             </div>
             <div class="modal-footer">
                 <button class="btn-secondary" onclick="App.closeModal()">取消</button>
                 <button class="btn-primary" id="optDoBtn" onclick="StoryboardModule._doOptimize('${kind}','${gid}',${panel})">✨ 开始优化</button>
             </div>`;
         document.getElementById('modalOverlay').classList.add('active');
+    },
+
+    // 清理优化系统提示语里的剧本占位：移除 {script} 及其所在的「【剧本背景参考】…」尾段（不发整部剧本时无意义）。
+    _cleanOptimizeSysPrompt(tmpl) {
+        let s = String(tmpl || '');
+        // 去掉「【剧本背景参考】\n{script}」整段（含其前导换行）
+        s = s.replace(/\s*【剧本背景参考】[\s\S]*$/m, '');
+        // 兜底：去掉残留的 {script} 占位
+        s = s.replace(/\{script\}/g, '');
+        return s.trim();
     },
 
     // 弹窗「开始优化」：把文本框内容作为 user prompt 发后端（script 发空），回写结果并支持恢复。
@@ -370,6 +385,9 @@ const StoryboardModule = {
         if (!userPrompt) { App.showToast('提示语不能为空', 'error'); return; }
         const llm = SettingsModule.getLlmConfig();
         if (!llm.key) { App.showToast('请先在设置页填写文本大模型 API Key', 'error'); return; }
+        // 系统提示语用弹窗里（来自设置、可临时改）的内容；已不含 {script}，发空剧本即可
+        const sysEl = document.getElementById('optSysPrompt');
+        const sysPrompt = sysEl ? sysEl.value : this._cleanOptimizeSysPrompt(llm.optimizePrompt || '');
 
         const btn = document.getElementById('optDoBtn');
         if (btn) { btn.disabled = true; btn.textContent = '⏳ 优化中'; }
@@ -378,7 +396,7 @@ const StoryboardModule = {
                 mode: 'optimize',
                 prompt: userPrompt,
                 script: '',                       // 不发整部剧本
-                system_prompt: llm.optimizePrompt,
+                system_prompt: sysPrompt,
                 api_url: llm.url, api_key: llm.key, model: llm.model,
             });
             if (!r.success || !r.text) throw new Error(r.error || '优化失败');
