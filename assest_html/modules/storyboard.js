@@ -148,6 +148,7 @@ const StoryboardModule = {
                     <button class="btn-ghost btn-tiny ${genning ? 'btn-disabled' : ''}" id="fgBtn_${g.id}" ${genning ? 'disabled' : ''}
                         onclick="${genning ? '' : `StoryboardModule.genFourGrid('${g.id}')`}">${genning ? `⏳ ${elapsed}s` : '🎨 生成'}</button>
                     <button class="btn-ghost btn-tiny" onclick="StoryboardModule.uploadFourGrid('${g.id}')">📁 上传</button>
+                    ${fourUrl ? `<button class="btn-ghost btn-tiny" title="把整张四宫格水平镜像翻转后替换，并重新切分面板" onclick="StoryboardModule.flipFourGrid('${g.id}')">⇋ 翻转</button>` : ''}
                     ${fgHistCount > 0 ? `<button class="btn-ghost btn-tiny" title="查看本组历次生成的四宫格图并切换" onclick="StoryboardModule.showFourGridHistory('${g.id}')">📜 历史(${fgHistCount})</button>` : ''}
                 </div>
                 ${errMsg && !genning ? this._fgErrorTag(errMsg, g.id) : ''}
@@ -342,6 +343,7 @@ const StoryboardModule = {
                         onclick="${imgGenning ? '' : `StoryboardModule.openSingleGenModal('${g.id}')`}">${imgGenning ? '⏳ 生成中' : '🎨 生成'}</button>
                     <button class="btn-ghost btn-tiny" onclick="StoryboardModule.uploadSingleImage('${g.id}')">📁 上传</button>
                     <button class="btn-ghost btn-tiny" title="从历史/素材库选一张图直接替换当前画面" onclick="StoryboardModule.replaceSingleImage('${g.id}')">🔄 替换</button>
+                    ${imgUrl ? `<button class="btn-ghost btn-tiny" title="把当前画面水平镜像翻转后替换" onclick="StoryboardModule.flipSingleImage('${g.id}')">⇋ 翻转</button>` : ''}
                     ${imgHistCount > 0 ? `<button class="btn-ghost btn-tiny" title="查看本单分镜的历次生成图像并切换" onclick="StoryboardModule.showSingleImageHistory('${g.id}')">📜 历史(${imgHistCount})</button>` : ''}
                 </div>
                 ${imgErr && !imgGenning ? this._singleImgErrorTag(g.id, imgErr) : ''}
@@ -911,16 +913,18 @@ const StoryboardModule = {
         const g = (p.storyboardGroups || []).find(x => x.id === gid);
         if (!g) return;
 
-        // 弹窗内有序参考图列表（@图1、@图2… 即此顺序）：已选过沿用 g.refImageIds；否则默认 [前帧, 后帧]。
-        let refIds = (g.refImageIds || []).map(v => parseInt(v)).filter(v => !isNaN(v));
-        if (!refIds.length) {
-            const { prevId, nextId } = this._neighborFrameIds(g);
-            refIds = [prevId, nextId].filter(v => v != null).map(v => parseInt(v));
-            refIds = Array.from(new Set(refIds));
+        // 弹窗内有序参考图列表（@图1、@图2… 即此顺序）：
+        //  - 用户在弹窗里手动增/删过参考图（g.refImageIdsManual=true）→ 沿用 g.refImageIds；
+        //  - 否则（默认前/后帧）→ 每次打开都实时重算前一帧/后一帧，避免相邻分镜被「替换/翻转」后这里还引用旧图。
+        let refIds;
+        const manual = !!g.refImageIdsManual && (g.refImageIds || []).length;
+        if (manual) {
+            refIds = Array.from(new Set((g.refImageIds || []).map(v => parseInt(v)).filter(v => !isNaN(v))));
         } else {
-            refIds = Array.from(new Set(refIds));
+            const { prevId, nextId } = this._neighborFrameIds(g);
+            refIds = Array.from(new Set([prevId, nextId].filter(v => v != null).map(v => parseInt(v))));
         }
-        this._sgCtx = { gid, refs: refIds };
+        this._sgCtx = { gid, refs: refIds, manual: !!manual };
 
         // 画面提示语（独立字段 g.imgPrompt）：已填过用它；否则用「@图1/@图2 + 拼入 local 提示语」的默认文案
         const promptVal = (g.imgPrompt && g.imgPrompt.trim()) ? g.imgPrompt : this._defaultImgPrompt(g);
@@ -1005,11 +1009,12 @@ const StoryboardModule = {
         return `<div class="sb-fg-ref-grid">${cells || '<div class="form-hint">未选参考图，可点下方「添加参考图」选择</div>'}</div>${addBtn}`;
     },
 
-    // 移除清单里的某张参考图
+    // 移除清单里的某张参考图（算「手动调整」，之后不再被默认前/后帧逻辑覆盖）
     _sgRemoveRef(mid) {
         const ctx = this._sgCtx; if (!ctx) return;
         mid = parseInt(mid);
         ctx.refs = (ctx.refs || []).filter(x => x !== mid);
+        ctx.manual = true;
         const host = document.getElementById('singleGenRefList');
         if (host) host.innerHTML = this._renderSingleGenRefs();
     },
@@ -1048,10 +1053,12 @@ const StoryboardModule = {
         const cells = document.querySelectorAll('#modalContent .sb-pick-cell input[type=checkbox]:checked');
         const ids = Array.from(cells).map(c => parseInt(c.value)).filter(v => !isNaN(v));
         ctx.refs = Array.from(new Set(ids));
+        ctx.manual = true;   // 用户主动选过 → 之后沿用该清单，不再被默认前/后帧覆盖
         // 回到生成弹窗（会用 ctx.refs 渲染清单；提示语用暂存 ctx.prompt 或库里 g.prompt）
         this.openSingleGenModal(ctx.gid);
-        // openSingleGenModal 会重置 ctx.refs 为库里值，故这里需把刚选的写回并重渲染
+        // openSingleGenModal 会重置 ctx 为库里值，故这里需把刚选的 refs + 手动标记写回并重渲染
         this._sgCtx.refs = ctx.refs;
+        this._sgCtx.manual = true;
         if (ctx.prompt != null) {
             const ta = document.getElementById('singleGenPrompt');
             if (ta) ta.value = ctx.prompt;
@@ -1112,6 +1119,8 @@ const StoryboardModule = {
         const ctx = this._sgCtx || { refs: [] };
         g.imgPrompt = prompt;
         g.refImageIds = (ctx.refs || []).slice();
+        // 仅当用户手动增删过参考图才记为「手动」；否则保持默认（下次打开实时按当前前/后帧重算，跟随相邻分镜的替换/翻转）
+        g.refImageIdsManual = !!ctx.manual;
         // 记住本次选的 API 分组/模型/尺寸/画质（下次打开弹窗默认沿用，生图时使用）
         g.genCfg = this._readSgCfg();
         Storage.updateProject(this.projectId, { storyboardGroups: p.storyboardGroups });
@@ -1651,6 +1660,7 @@ emotions: this._collectEmotions(),
                 </div>
                 <div class="sb-local-thumb-acts">
                     <button class="btn-ghost btn-tiny sb-local-replace" title="从以往生成的任意图像中选一张替换本面板的画面" onclick="event.stopPropagation();StoryboardModule.replacePanelImage('${g.id}',${i})">🔄 替换</button>
+                    ${pUrl ? `<button class="btn-ghost btn-tiny sb-local-flip" title="把本面板画面水平镜像翻转后替换" onclick="event.stopPropagation();StoryboardModule.flipPanelImage('${g.id}',${i})">⇋ 翻转</button>` : ''}
                     <button class="btn-ghost btn-tiny sb-local-insert" title="在本面板后插入一个独立单分镜（会把本组从这格拆开）" onclick="event.stopPropagation();StoryboardModule.insertSingleInGroup('${g.id}',${i})">＋ 单分镜</button>
                 </div>
             </div>
@@ -3460,6 +3470,100 @@ emotions: this._collectEmotions(),
             ids[i] = entry.id;
         }
         g.panelImages = ids;
+    },
+
+    // ============================================================
+    // 图像水平翻转：把某张 media 水平镜像后存为一张新图，返回新 media entry。
+    // 处理跨域：历史/切分图常是「服务器路径URL」，直接 drawImage 后 toDataURL 会因画布污染抛 SecurityError，
+    // 故优先 fetch→blob→dataURL 转同源，失败再退回 crossOrigin 加载。
+    // ownerId：新图归属（与原图同 owner，方便进历史/被识别）。
+    // ============================================================
+    async _flipImageMedia(mid, ownerId) {
+        const m = Storage.getMediaById(this.projectId, mid);
+        if (!m) throw new Error('原图不存在');
+        let src = Storage.mediaUrl(m.data);
+        if (src && !src.startsWith('data:')) {
+            try {
+                const blob = await (await fetch(src, { cache: 'no-store' })).blob();
+                src = await new Promise((res, rej) => {
+                    const fr = new FileReader();
+                    fr.onload = () => res(fr.result); fr.onerror = rej; fr.readAsDataURL(blob);
+                });
+            } catch (e) { /* 退回原 URL，下面再试 crossOrigin */ }
+        }
+        const img = await new Promise((res, rej) => {
+            const im = new Image();
+            im.crossOrigin = 'anonymous';
+            im.onload = () => res(im); im.onerror = rej; im.src = src;
+        });
+        const w = img.naturalWidth, h = img.naturalHeight;
+        const cv = document.createElement('canvas');
+        cv.width = w; cv.height = h;
+        const ctx = cv.getContext('2d');
+        ctx.translate(w, 0);
+        ctx.scale(-1, 1);
+        ctx.drawImage(img, 0, 0, w, h);
+        const outData = cv.toDataURL('image/png');
+        const oid = ownerId || (m.ownerId || 'storyboards');
+        return await Storage._addMedia(this.projectId, 'image', 'storyboards', oid, outData, null, { w, h });
+    },
+
+    // 单分镜图：水平翻转后替换当前画面（存为该单分镜的一张新历史图并设为当前）
+    async flipSingleImage(gid) {
+        const p = Storage.getProject(this.projectId);
+        const g = (p.storyboardGroups || []).find(x => x.id === gid);
+        if (!g || g.imageId == null) { App.showToast('当前没有可翻转的图', 'info'); return; }
+        App.showToast('正在水平翻转…', 'info');
+        try {
+            const entry = await this._flipImageMedia(g.imageId, gid + '_single');
+            g.imageId = entry.id; g.imageError = '';
+            Storage.updateProject(this.projectId, { storyboardGroups: p.storyboardGroups });
+            App.showToast('✅ 已水平翻转并替换', 'success');
+            this.render(this.projectId);
+        } catch (e) {
+            App.showToast('翻转失败：' + (e && e.message ? e.message : e), 'error');
+        }
+    },
+
+    // 四宫格成品图：水平翻转后替换当前四宫格，并重新切分 4 个面板
+    async flipFourGrid(gid) {
+        const p = Storage.getProject(this.projectId);
+        const g = (p.storyboardGroups || []).find(x => x.id === gid);
+        if (!g || g.fourGridImageId == null) { App.showToast('当前没有可翻转的四宫格图', 'info'); return; }
+        App.showToast('正在水平翻转并重新切分…', 'info');
+        try {
+            const entry = await this._flipImageMedia(g.fourGridImageId, gid);
+            g.fourGridImageId = entry.id; g.fourGridError = '';
+            let ok = true;
+            try { await this._splitFourGrid(g, Storage.mediaUrl(entry.data)); }
+            catch (e) { ok = false; g.fourGridError = '切分失败：' + (e && e.message ? e.message : e); }
+            Storage.updateProject(this.projectId, { storyboardGroups: p.storyboardGroups });
+            App.showToast(ok ? '✅ 已水平翻转并重新切分面板' : '已翻转，但切分失败：' + g.fourGridError, ok ? 'success' : 'error');
+            this.render(this.projectId);
+        } catch (e) {
+            App.showToast('翻转失败：' + (e && e.message ? e.message : e), 'error');
+        }
+    },
+
+    // 四宫格某面板切分图：水平翻转后替换该面板画面
+    async flipPanelImage(gid, i) {
+        i = parseInt(i, 10) || 0;
+        const p = Storage.getProject(this.projectId);
+        const g = (p.storyboardGroups || []).find(x => x.id === gid);
+        if (!g) return;
+        const imgId = (g.panelImages || [])[i];
+        if (imgId == null) { App.showToast('该面板没有可翻转的图', 'info'); return; }
+        App.showToast('正在水平翻转…', 'info');
+        try {
+            const entry = await this._flipImageMedia(imgId, gid + '_panel' + i);
+            if (!Array.isArray(g.panelImages)) g.panelImages = [null, null, null, null];
+            g.panelImages[i] = entry.id;
+            Storage.updateProject(this.projectId, { storyboardGroups: p.storyboardGroups });
+            App.showToast('✅ 已水平翻转并替换该面板', 'success');
+            this.render(this.projectId);
+        } catch (e) {
+            App.showToast('翻转失败：' + (e && e.message ? e.message : e), 'error');
+        }
     },
 
     // ============================================================
