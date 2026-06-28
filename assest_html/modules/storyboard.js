@@ -148,7 +148,6 @@ const StoryboardModule = {
                     <button class="btn-ghost btn-tiny ${genning ? 'btn-disabled' : ''}" id="fgBtn_${g.id}" ${genning ? 'disabled' : ''}
                         onclick="${genning ? '' : `StoryboardModule.genFourGrid('${g.id}')`}">${genning ? `⏳ ${elapsed}s` : '🎨 生成'}</button>
                     <button class="btn-ghost btn-tiny" onclick="StoryboardModule.uploadFourGrid('${g.id}')">📁 上传</button>
-                    ${fourUrl ? `<button class="btn-ghost btn-tiny" title="把整张四宫格水平镜像翻转后替换，并重新切分面板" onclick="StoryboardModule.flipFourGrid('${g.id}')">⇋ 翻转</button>` : ''}
                     ${fgHistCount > 0 ? `<button class="btn-ghost btn-tiny" title="查看本组历次生成的四宫格图并切换" onclick="StoryboardModule.showFourGridHistory('${g.id}')">📜 历史(${fgHistCount})</button>` : ''}
                 </div>
                 ${errMsg && !genning ? this._fgErrorTag(errMsg, g.id) : ''}
@@ -341,7 +340,6 @@ const StoryboardModule = {
                 <div class="list-img-btns sb-single-img-btns">
                     <button class="btn-ghost btn-tiny ${imgGenning ? 'btn-disabled' : ''}" id="siImgBtn_${g.id}" ${imgGenning ? 'disabled' : ''}
                         onclick="${imgGenning ? '' : `StoryboardModule.openSingleGenModal('${g.id}')`}">${imgGenning ? '⏳ 生成中' : '🎨 生成'}</button>
-                    <button class="btn-ghost btn-tiny" onclick="StoryboardModule.uploadSingleImage('${g.id}')">📁 上传</button>
                     <button class="btn-ghost btn-tiny" title="从历史/素材库选一张图直接替换当前画面" onclick="StoryboardModule.replaceSingleImage('${g.id}')">🔄 替换</button>
                     ${imgUrl ? `<button class="btn-ghost btn-tiny" title="把当前画面水平镜像翻转后替换" onclick="StoryboardModule.flipSingleImage('${g.id}')">⇋ 翻转</button>` : ''}
                     ${imgHistCount > 0 ? `<button class="btn-ghost btn-tiny" title="查看本单分镜的历次生成图像并切换" onclick="StoryboardModule.showSingleImageHistory('${g.id}')">📜 历史(${imgHistCount})</button>` : ''}
