@@ -144,7 +144,7 @@ const StoryboardModule = {
                         ? `<img src="${fourUrl}" alt="四宫格"><div class="sb-grid-lines"></div>`
                         : `<div class="sb-thumb-placeholder ${errMsg ? 'sb-thumb-error' : ''}">${placeholder}</div>`}
                 </div>
-                <div class="list-img-btns">
+                <div class="list-img-btns sb-single-img-btns">
                     <button class="btn-ghost btn-tiny ${genning ? 'btn-disabled' : ''}" id="fgBtn_${g.id}" ${genning ? 'disabled' : ''}
                         onclick="${genning ? '' : `StoryboardModule.genFourGrid('${g.id}')`}">${genning ? `⏳ ${elapsed}s` : '🎨 生成'}</button>
                     <button class="btn-ghost btn-tiny" onclick="StoryboardModule.uploadFourGrid('${g.id}')">📁 上传</button>
