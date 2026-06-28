@@ -295,6 +295,113 @@ const StoryboardModule = {
         };
     },
 
+    // 取「画面序列」里某一项对应的 local 提示语文本（单分镜=g.prompt；四宫格面板=g.localPrompts[panel]）。
+    _frameLocalText(frame) {
+        if (!frame) return '';
+        const p = Storage.getProject(this.projectId);
+        const g = (p.storyboardGroups || []).find(x => String(x.id) === String(frame.gid));
+        if (!g) return '';
+        if (frame.kind === 'single') return (g.prompt || '').trim();
+        return ((g.localPrompts || [])[frame.panel] || '').trim();
+    },
+
+    // 取「当前画面」的下一条 local 文本：kind='single' 用 gid 定位；kind='panel' 用 gid+panel 定位。
+    _nextLocalText(kind, gid, panel) {
+        const seq = this._buildFrameSeq();
+        let idx;
+        if (kind === 'single') {
+            idx = seq.findIndex(s => s.kind === 'single' && String(s.gid) === String(gid));
+        } else {
+            idx = seq.findIndex(s => s.kind === 'panel' && String(s.gid) === String(gid) && s.panel === panel);
+        }
+        if (idx < 0 || idx >= seq.length - 1) return '';
+        return this._frameLocalText(seq[idx + 1]);
+    },
+
+    // 拼接「发给模型的用户提示语」：当前 local + 下一条 local（作为衔接上下文，仅供参考，不发全剧本）。
+    _buildOptimizeUserPrompt(curLocal, nextLocal) {
+        let s = `【当前分镜 local 提示语（请优化这一条）】\n${curLocal}`;
+        if (nextLocal) {
+            s += `\n\n【下一个分镜 local 提示语（仅作衔接参考，不要优化它、不要输出它）】\n${nextLocal}`;
+        }
+        s += `\n\n请只输出优化后的「当前分镜」提示语正文本身，不要解释、不要前后缀、不要引号。`;
+        return s;
+    },
+
+    // ===== 优化弹窗：显示「将发给模型的完整提示语」（可修改），确认后才调用大模型 =====
+    // kind: 'single' | 'panel'；panel: 面板序号（kind=panel 时有效）
+    openOptimizeModal(kind, gid, panel) {
+        panel = parseInt(panel, 10); if (isNaN(panel)) panel = 0;
+        const p = Storage.getProject(this.projectId);
+        const g = (p.storyboardGroups || []).find(x => x.id === gid);
+        if (!g) return;
+        const curLocal = kind === 'single'
+            ? (g.prompt || '').trim()
+            : (((g.localPrompts || [])[panel]) || '').trim();
+        if (!curLocal) { App.showToast('请先填写 local 提示语再优化', 'info'); return; }
+        const llm = SettingsModule.getLlmConfig();
+        if (!llm.key) { App.showToast('请先在设置页填写文本大模型 API Key', 'error'); return; }
+
+        const nextLocal = this._nextLocalText(kind, gid, panel);
+        const userPrompt = this._buildOptimizeUserPrompt(curLocal, nextLocal);
+
+        const mc = document.getElementById('modalContent');
+        mc.innerHTML = `
+            <div class="modal-header"><h2 class="modal-title">✨ 优化 local 提示语</h2><button class="modal-close" onclick="App.closeModal()">×</button></div>
+            <div class="modal-body">
+                <p class="form-hint" style="margin-bottom:0.4rem">下面是将发送给大模型的完整内容（已带上「下一个分镜」作衔接参考，<b>不发整部剧本</b>）。可直接修改后再优化。</p>
+                <textarea class="form-textarea" id="optUserPrompt" style="min-height:220px;white-space:pre-wrap">${this.esc(userPrompt)}</textarea>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-secondary" onclick="App.closeModal()">取消</button>
+                <button class="btn-primary" id="optDoBtn" onclick="StoryboardModule._doOptimize('${kind}','${gid}',${panel})">✨ 开始优化</button>
+            </div>`;
+        document.getElementById('modalOverlay').classList.add('active');
+    },
+
+    // 弹窗「开始优化」：把文本框内容作为 user prompt 发后端（script 发空），回写结果并支持恢复。
+    async _doOptimize(kind, gid, panel) {
+        panel = parseInt(panel, 10); if (isNaN(panel)) panel = 0;
+        const p = Storage.getProject(this.projectId);
+        const g = (p.storyboardGroups || []).find(x => x.id === gid);
+        if (!g) return;
+        const ta = document.getElementById('optUserPrompt');
+        const userPrompt = ta ? ta.value.trim() : '';
+        if (!userPrompt) { App.showToast('提示语不能为空', 'error'); return; }
+        const llm = SettingsModule.getLlmConfig();
+        if (!llm.key) { App.showToast('请先在设置页填写文本大模型 API Key', 'error'); return; }
+
+        const btn = document.getElementById('optDoBtn');
+        if (btn) { btn.disabled = true; btn.textContent = '⏳ 优化中'; }
+        try {
+            const r = await API.post('/api/llm/optimize_prompt', {
+                mode: 'optimize',
+                prompt: userPrompt,
+                script: '',                       // 不发整部剧本
+                system_prompt: llm.optimizePrompt,
+                api_url: llm.url, api_key: llm.key, model: llm.model,
+            });
+            if (!r.success || !r.text) throw new Error(r.error || '优化失败');
+            if (kind === 'single') {
+                const cur = (g.prompt || '').trim();
+                if (g.promptBackup == null) g.promptBackup = cur;
+                g.prompt = r.text;
+            } else {
+                if (!Array.isArray(g.localPrompts)) g.localPrompts = ['', '', '', ''];
+                if (!Array.isArray(g.localBackup)) g.localBackup = [null, null, null, null];
+                if (g.localBackup[panel] == null) g.localBackup[panel] = (g.localPrompts[panel] || '').trim();
+                g.localPrompts[panel] = r.text;
+            }
+            Storage.updateProject(this.projectId, { storyboardGroups: p.storyboardGroups });
+            App.closeModal();
+            this.render(this.projectId);
+            App.showToast('已用大模型优化，可点「↩ 恢复」还原', 'success');
+        } catch (e) {
+            App.showToast('优化失败：' + (e.message || e), 'error');
+            if (btn) { btn.disabled = false; btn.textContent = '✨ 开始优化'; }
+        }
+    },
+
     // 渲染「内嵌在四宫格里的单分镜」行：复用单分镜卡片，外层包一个 sb-inline-single 容器（不同底色 + 可删除）。
     renderInlineSingleRow(parentGroup, sg) {
         // 复用 renderSingleCard 生成完整单分镜卡片（含生成/上传/参考图/台词/配音/历史/删除等全部能力）
@@ -361,7 +468,7 @@ const StoryboardModule = {
                         <div class="meta-header">
                             <span class="meta-label">local 提示语</span>
                             <span class="sb-prompt-actions">
-                                <button class="btn-ghost btn-tiny" id="optBtn_${g.id}" title="用大模型结合剧本优化这条提示语" onclick="StoryboardModule.optimizeLocalPrompt('${g.id}')">✨ 优化</button>
+                                <button class="btn-ghost btn-tiny" id="optBtn_${g.id}" title="弹窗预览并优化这条 local 提示语（仅发当前+下一条 local，不发全剧本）" onclick="StoryboardModule.openOptimizeModal('single','${g.id}',0)">✨ 优化</button>
                                 ${g.promptBackup != null ? `<button class="btn-ghost btn-tiny" title="恢复优化前的提示语" onclick="StoryboardModule.restoreLocalPrompt('${g.id}')">↩ 恢复</button>` : ''}
                             </span>
                         </div>
@@ -1666,7 +1773,7 @@ emotions: this._collectEmotions(),
                 <div class="sb-local-prompt-head">
                     <span class="sb-local-prompt-label">local 提示词</span>
                     <span class="sb-prompt-actions">
-                        <button class="btn-ghost btn-tiny" id="optBtn_${g.id}_${i}" title="用大模型结合剧本优化这条 local 提示语" onclick="StoryboardModule.optimizePanelPrompt('${g.id}',${i})">✨ 优化</button>
+                        <button class="btn-ghost btn-tiny" id="optBtn_${g.id}_${i}" title="弹窗预览并优化这条 local 提示语（仅发当前+下一条 local，不发全剧本）" onclick="StoryboardModule.openOptimizeModal('panel','${g.id}',${i})">✨ 优化</button>
                         ${(g.localBackup && g.localBackup[i] != null) ? `<button class="btn-ghost btn-tiny" title="恢复优化前的 local 提示语" onclick="StoryboardModule.restorePanelPrompt('${g.id}',${i})">↩ 恢复</button>` : ''}
                     </span>
                 </div>
