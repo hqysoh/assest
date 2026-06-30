@@ -305,8 +305,8 @@ const StoryboardModule = {
         return ((g.localPrompts || [])[frame.panel] || '').trim();
     },
 
-    // 取「当前画面」的下一条 local 文本：kind='single' 用 gid 定位；kind='panel' 用 gid+panel 定位。
-    _nextLocalText(kind, gid, panel) {
+    // 取「当前画面」的上一条 local 文本：kind='single' 用 gid 定位；kind='panel' 用 gid+panel 定位。
+    _prevLocalText(kind, gid, panel) {
         const seq = this._buildFrameSeq();
         let idx;
         if (kind === 'single') {
@@ -314,16 +314,17 @@ const StoryboardModule = {
         } else {
             idx = seq.findIndex(s => s.kind === 'panel' && String(s.gid) === String(gid) && s.panel === panel);
         }
-        if (idx < 0 || idx >= seq.length - 1) return '';
-        return this._frameLocalText(seq[idx + 1]);
+        if (idx <= 0) return '';
+        return this._frameLocalText(seq[idx - 1]);
     },
 
-    // 拼接「发给模型的用户提示语」：当前 local + 下一条 local（作为衔接上下文，仅供参考，不发全剧本）。
-    _buildOptimizeUserPrompt(curLocal, nextLocal) {
-        let s = `【当前分镜 local 提示语（请优化这一条）】\n${curLocal}`;
-        if (nextLocal) {
-            s += `\n\n【下一个分镜 local 提示语（仅作衔接参考，不要优化它、不要输出它）】\n${nextLocal}`;
+    // 拼接「发给模型的用户提示语」：上一条 local（衔接上文，仅参考）+ 当前 local（待优化），不发全剧本。
+    _buildOptimizeUserPrompt(curLocal, prevLocal) {
+        let s = '';
+        if (prevLocal) {
+            s += `【上一个分镜 local 提示语（仅作衔接参考，不要优化它、不要输出它）】\n${prevLocal}\n\n`;
         }
+        s += `【当前分镜 local 提示语（请优化这一条）】\n${curLocal}`;
         s += `\n\n请只输出优化后的「当前分镜」提示语正文本身，不要解释、不要前后缀、不要引号。`;
         return s;
     },
@@ -342,8 +343,8 @@ const StoryboardModule = {
         const llm = SettingsModule.getLlmConfig();
         if (!llm.key) { App.showToast('请先在设置页填写文本大模型 API Key', 'error'); return; }
 
-        const nextLocal = this._nextLocalText(kind, gid, panel);
-        const userPrompt = this._buildOptimizeUserPrompt(curLocal, nextLocal);
+        const prevLocal = this._prevLocalText(kind, gid, panel);
+        const userPrompt = this._buildOptimizeUserPrompt(curLocal, prevLocal);
         // 系统提示语：取设置里的「优化提示语」，因为不发整部剧本，这里把 {script} 占位（及其所在的「剧本背景参考」尾段）清理掉再展示
         const sysPrompt = this._cleanOptimizeSysPrompt(llm.optimizePrompt || '');
 
@@ -354,7 +355,7 @@ const StoryboardModule = {
                 <p class="form-hint" style="margin-bottom:0.4rem">下面是将发送给大模型的完整内容（<b>不发整部剧本</b>）。系统提示语来自「设置」，可在此临时修改。</p>
                 <label class="form-label">系统提示语（来自设置）</label>
                 <textarea class="form-textarea" id="optSysPrompt" style="min-height:120px;white-space:pre-wrap">${this.esc(sysPrompt)}</textarea>
-                <label class="form-label" style="margin-top:0.5rem">用户内容（当前 + 下一条 local 作衔接参考）</label>
+                <label class="form-label" style="margin-top:0.5rem">用户内容（上一条 local 作衔接参考 + 当前待优化）</label>
                 <textarea class="form-textarea" id="optUserPrompt" style="min-height:160px;white-space:pre-wrap">${this.esc(userPrompt)}</textarea>
             </div>
             <div class="modal-footer">
@@ -486,7 +487,7 @@ const StoryboardModule = {
                         <div class="meta-header">
                             <span class="meta-label">local 提示语</span>
                             <span class="sb-prompt-actions">
-                                <button class="btn-ghost btn-tiny" id="optBtn_${g.id}" title="弹窗预览并优化这条 local 提示语（仅发当前+下一条 local，不发全剧本）" onclick="StoryboardModule.openOptimizeModal('single','${g.id}',0)">✨ 优化</button>
+                                <button class="btn-ghost btn-tiny" id="optBtn_${g.id}" title="弹窗预览并优化这条 local 提示语（仅发当前+上一条 local，不发全剧本）" onclick="StoryboardModule.openOptimizeModal('single','${g.id}',0)">✨ 优化</button>
                                 ${g.promptBackup != null ? `<button class="btn-ghost btn-tiny" title="恢复优化前的提示语" onclick="StoryboardModule.restoreLocalPrompt('${g.id}')">↩ 恢复</button>` : ''}
                             </span>
                         </div>
@@ -1791,7 +1792,7 @@ emotions: this._collectEmotions(),
                 <div class="sb-local-prompt-head">
                     <span class="sb-local-prompt-label">local 提示词</span>
                     <span class="sb-prompt-actions">
-                        <button class="btn-ghost btn-tiny" id="optBtn_${g.id}_${i}" title="弹窗预览并优化这条 local 提示语（仅发当前+下一条 local，不发全剧本）" onclick="StoryboardModule.openOptimizeModal('panel','${g.id}',${i})">✨ 优化</button>
+                        <button class="btn-ghost btn-tiny" id="optBtn_${g.id}_${i}" title="弹窗预览并优化这条 local 提示语（仅发当前+上一条 local，不发全剧本）" onclick="StoryboardModule.openOptimizeModal('panel','${g.id}',${i})">✨ 优化</button>
                         ${(g.localBackup && g.localBackup[i] != null) ? `<button class="btn-ghost btn-tiny" title="恢复优化前的 local 提示语" onclick="StoryboardModule.restorePanelPrompt('${g.id}',${i})">↩ 恢复</button>` : ''}
                     </span>
                 </div>
