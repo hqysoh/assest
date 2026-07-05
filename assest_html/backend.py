@@ -1403,15 +1403,19 @@ def run_director_singularity_sync(params, task_id=None):
     uploaded_names = []   # 本次上传到 input 的临时图，结束后清理
     for bi, block in enumerate(blocks):
         segs = block['segs']
-        # 块内共享的 local prompt：取块内第一段（同组前端已共享同一 prompt）
+        # 块内共享的 local prompt：仅作「该段自己没写 prompt 时」的回退默认，取块内第一段。
+        # ★ 不能再无脑用它覆盖块内所有段——否则各段各自的台词（前端已把「说话人+台词+语气」拼进各段 prompt）
+        #   会被第一段的 prompt 覆盖，表现为「所有人物都只说第一段台词」。
         shared_text = (segs[0].get('prompt', '') or '').strip()
-        if shared_text and '无字幕' not in shared_text:
-            shared_text = shared_text + '，无字幕'
 
-        # 块内每张图各自成一个「单图段」：每段 1 图、start_frame 递增、text 用共享 prompt。
+        # 块内每张图各自成一个「单图段」：每段 1 图、start_frame 递增、text 用「本段自己的 prompt」。
         # 这样下游 InfoOutput 会为每段吐一个 start_frame，与图数一一对应（真正的多关键帧）。
         for k, s in enumerate(segs):
             s_len = max(1, int(s.get('length', 90)))
+            # 本段文本：优先用该段自己的 prompt（含各自台词）；为空才回退块内共享的第一段 prompt。
+            seg_text = (s.get('prompt', '') or '').strip() or shared_text
+            if seg_text and '无字幕' not in seg_text:
+                seg_text = seg_text + '，无字幕'
             img_name = ''
             if s.get('image_b64'):
                 try:
@@ -1425,7 +1429,7 @@ def run_director_singularity_sync(params, task_id=None):
             # 不要用 url（easy timelineEditor 的 load_image_tensor 解析 url 会走 urllib，
             # 受本机代理影响访问 127.0.0.1:8188 失败 → 图丢失 → PromptRelay 回退 704x480）。
             content = {
-                'text': shared_text,
+                'text': seg_text,
                 'images': ([{
                     'source_type': 'input',
                     'file_path': img_name,
@@ -1483,6 +1487,53 @@ def run_director_singularity_sync(params, task_id=None):
                 im['end_frame'] = im.get('end_frame', 0) + pad
         total_frames = aligned
 
+    # === 音频轨：乱神版可发音频（对应工作流「Using Editor Audio」开关 = 节点 99）===
+    #   - use_custom_audio=True 且有音频段 → 上传音频到 ComfyUI input，填进 timelineEditor 的 audio 轨，
+    #     并把节点 99（PrimitiveBoolean "Using Editor Audio"）置 True，让 ifElse(71/95) 走「编辑器音频」分支。
+    #   - 否则 → audio 轨留空、节点 99 保持 False，语音仍由模型按画面/剧情自行生成（原行为不变）。
+    #   音频段结构与图像段同构：{id, start_frame, end_frame, content:{audio 引用}}，
+    #   音频引用同样用 source_type="input" + file_path/file_name（与图像一致，避免 url 走本机代理下载失败）。
+    aud_segs_in = sorted(params.get('audioSegments') or [], key=lambda s: int(s.get('start', 0)))
+    want_audio = bool(params.get('use_custom_audio')) and len(aud_segs_in) > 0
+    audio_segments = []
+    if want_audio:
+        for j, a in enumerate(aud_segs_in):
+            if not a.get('audio_b64'):
+                continue
+            a_start = max(0, int(a.get('start', 0)))
+            a_len = max(1, int(a.get('length', 90)))
+            if a_start >= total_frames:
+                continue                       # 完全超出总时长的音频段丢弃
+            a_end = min(total_frames, a_start + a_len)
+            try:
+                araw = base64.b64decode(a['audio_b64'])
+                amime = a.get('audio_mime', 'audio/wav')
+                aext = 'mp3' if 'mp3' in amime else ('flac' if 'flac' in amime else 'wav')
+                aname = comfy_upload_file(araw, f"sbaud_{int(time.time()*1000)}_{j}.{aext}")
+                uploaded_names.append(aname)
+            except Exception as e:
+                comfy_cleanup_input_files(uploaded_names)
+                return {'success': False, 'error': f'第{j+1}个音频上传失败: {e}'}
+            # 裁掉音频开头 trimStart 帧：timelineEditor 通过「顶层 origin_start_frame」实现
+            #   trim_offset = (start_frame - origin_start_frame) / fps（见 basic.py TimelineEditor audio 轨解析）。
+            #   即令 origin_start_frame = start_frame - trimStart，节点会跳过源音频开头对应的样本。
+            a_trim = max(0, int(a.get('trimStart', 0)))
+            audio_segments.append({
+                'id': f"aud{j}-{random.randint(100000,999999)}",
+                'start_frame': a_start,
+                'end_frame': a_end,
+                'origin_start_frame': a_start - a_trim,
+                'content': {
+                    'source_type': 'input',
+                    'file_path': aname,
+                    'file_name': aname,
+                },
+                'color': '#34d399',
+            })
+        # 若上传后一个有效音频段都没有 → 退回「不使用编辑器音频」，避免开了开关却空轨
+        if not audio_segments:
+            want_audio = False
+
     timeline_obj = {
         'tracks': [
             {
@@ -1493,7 +1544,7 @@ def run_director_singularity_sync(params, task_id=None):
             {
                 'id': f"track-audio-{random.randint(100000,999999)}",
                 'name': '音频轨 1', 'type': 'audio', 'color': '#34d399',
-                'muted': False, 'locked': False, 'segments': [],
+                'muted': False, 'locked': False, 'segments': audio_segments,
             },
         ],
         'total_length': total_frames,
@@ -1513,7 +1564,11 @@ def run_director_singularity_sync(params, task_id=None):
         if ct == 'easy timelineEditor':
             node['inputs']['timeline_data'] = timeline_data
             node['inputs']['resolution'] = _vres_label
-    print(f"[Singularity] resolution={_vres_label} ({_vw}x{_vh})")
+        # 节点 99「Using Editor Audio」：发音频时置 True（走编辑器音频轨），否则 False（模型自行生成语音）。
+        # 用 _meta.title 精确定位，避免误伤工作流里其它 PrimitiveBoolean（如 82「Sample Stage 1 Only」）。
+        elif ct == 'PrimitiveBoolean' and (node.get('_meta', {}).get('title') == 'Using Editor Audio'):
+            node['inputs']['value'] = bool(want_audio)
+    print(f"[Singularity] resolution={_vres_label} ({_vw}x{_vh}) use_editor_audio={want_audio} audio_segs={len(audio_segments)}")
 
     # 注：原先这里有一段对 LTX2SamplingPreviewOverride（采样实时预览节点）的剪枝逻辑——
     # 因后端经 /api/prompt 提交、无前端会话，该节点推预览会崩。现工作流已在 ComfyUI 里

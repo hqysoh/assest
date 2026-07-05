@@ -5670,7 +5670,8 @@ this._tl.workflow = wf;
                 }
                 imageSegments.push({
                     image_b64: b64,
-                    prompt: c.prompt || (c.dialogue && c.dialogue.text) || '',
+                    // 各段只发本段自己的 local 提示语（画面描述）；台词/配音由音频轨或工作流内的语音链路处理。
+                    prompt: c.prompt || '',
                     start: c.start, length: segLen,
                     transition: tText,
                     transition_dur: tText ? (Number(c.transitionDur) || 0.5) : 0,
@@ -5687,7 +5688,8 @@ this._tl.workflow = wf;
             // 每个子段一张图、共享同一 prompt（台词只挂第一张子段，避免重复配音），
             // 子段之间硬切（无转场），只有「整段最后一张子段」带上本段的转场文字。
             const durs = this._clipGuideDurs(c, guideIds.length, segLen);
-            const firstPrompt = c.prompt || (c.dialogue && c.dialogue.text) || '';
+            // 各子段都发同一句本段 local 提示语（画面描述）；配音由音频轨/语音链路处理，不在提示词里拼台词。
+            const firstPrompt = c.prompt || '';
             let subStart = c.start;
             for (let k = 0; k < guideIds.length; k++) {
                 const img = Storage.getMediaById(this.projectId, guideIds[k]);
@@ -5696,7 +5698,7 @@ this._tl.workflow = wf;
                 const isLast = k === guideIds.length - 1;
                 imageSegments.push({
                     image_b64: b64,
-                    // 提示词每张子段都带（保证 LTXDirector 不报缺 prompt），台词文本仅第一张带
+                    // 提示词每张子段都带（保证下游不报缺 prompt），各子段沿用同一句本段 local 提示语
                     prompt: firstPrompt,
                     start: subStart, length: durs[k],
                     // 转场只挂最后一张子段 → 整段结束后才过渡到下一分镜；段内各图之间硬切衔接
