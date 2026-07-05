@@ -4119,11 +4119,17 @@ emotions: this._collectEmotions(),
             if (g.single) {
                 if (g.inlineParent) return;              // 内嵌单分镜由其父组循环负责插入，顶层跳过避免重复
                 if (g.selected === false) return;        // 未勾选合成 → 不纳入
-                // 扩展四宫格的单分镜：拆成 4 段连续（占原时长平分），逐格用 panelImages（提示语统一用分镜 local）
+                // 扩展四宫格的单分镜：拆成 4 段连续（占原时长平分），逐格用 panelImages。
+                // ★ 每格用「该格自己的 local 提示语」g.localPrompts[i]（缺省回退 g.prompt），
+                //   否则 4 格共用同一句 g.prompt → 各段 text 完全相同（表现为"只说第一个分镜的话"）。
+                //   台词同理按格取 g.dialogues[i]（缺省回退 g.dialogue），配音也挂各格自己的 panelAudios[i]。
                 if (g.expanded && Array.isArray(g.panelImages) && g.panelImages.some(x => x != null)) {
                     const panels = g.panelImages || [];
                     if (panels.every(x => x == null)) { skipNoImg++; return; }
                     if (!firstMeta) firstMeta = g;
+                    const eLocals = Array.isArray(g.localPrompts) ? g.localPrompts : [];
+                    const eDlgs = Array.isArray(g.dialogues) ? g.dialogues : [];
+                    const eAuds = Array.isArray(g.panelAudios) ? g.panelAudios : [];
                     for (let i = 0; i < 4; i++) {
                         const imgId = panels[i];
                         if (imgId == null) continue;       // 缺某格则跳过该格（其余格仍连续）
@@ -4131,13 +4137,15 @@ emotions: this._collectEmotions(),
                             uid: Storage._uid(),
                             groupId: g.id, panel: i, single: true, expanded: true,
                             imageId: imgId,
-                            // 台词只放第 1 格，避免 4 段重复同一句配音
-                            audioId: i === 0 ? g.audioId : null,
-                            prompt: g.prompt || '',
+                            // 各格挂各自音频（无则退回：仅第 1 格用 g.audioId 兜底，避免整组无声）
+                            audioId: eAuds[i] || (i === 0 ? g.audioId : null),
+                            // 各格用各自 local 提示语；空则回退整组 g.prompt
+                            prompt: (eLocals[i] || '').trim() || (g.prompt || ''),
                             length: 90, trimStart: 0,
                             transition: g.transition || 'cut',
                             shotTransition: (g.shotTransitions || [])[i] || '',
-                            dialogue: i === 0 ? (g.dialogue || {}) : {},
+                            // 各格用各自台词；空则第 1 格回退 g.dialogue 兜底
+                            dialogue: eDlgs[i] || (i === 0 ? (g.dialogue || {}) : {}),
                         });
                     }
                     return;
