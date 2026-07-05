@@ -4200,7 +4200,9 @@ emotions: this._collectEmotions(),
         const first = firstMeta || {};
 
         // ===== 构建双轨时间轴模型（图像轨 + 音频轨，各自独立，可自由移位/拉伸/裁剪）=====
-        const DEF = 90;            // 默认每段帧数
+        // 默认每段帧数：取设置 videoDefaults.segFrames（可在设置页配置），无则回退 90
+        const _vd = Storage.getSettings().videoDefaults || {};
+        const DEF = (Number.isFinite(+_vd.segFrames) && +_vd.segFrames > 0) ? Math.round(+_vd.segFrames) : 90;
         const imageClips = [];
         const audioClips = [];
         let cursor = 0;
@@ -4253,7 +4255,7 @@ emotions: this._collectEmotions(),
             imageClips, audioClips,
             totalFrames: cursor,                 // 视频总长（可调）；超出部分置灰
             groupFrom, groupTo,                  // 视频历史命名用：参与合成的分镜组号范围
-            fps: this.FPS,
+            fps: (Number.isFinite(+_vd.fps) && +_vd.fps > 0) ? Math.round(+_vd.fps) : this.FPS,   // 时间轴初始帧率：取设置 videoDefaults.fps，无则回退默认
             pxPerFrame: 1.4,                      // 缩放：像素/帧
             globalPrompt: '',                     // 全局提示词默认发空给 comfyui 导演台（由各段 local 提示词驱动；不再用某段提示词冒充全局）
             guideStrength: '1.00',                // 引导强度默认值（1.0=最大约束，最贴近引导图）

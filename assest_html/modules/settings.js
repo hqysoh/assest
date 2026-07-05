@@ -147,8 +147,20 @@ const SettingsModule = {
                     <label class="form-label">生成视频分辨率</label>
                     <select class="form-input" id="vdResolution" onchange="SettingsModule.saveVideoDefaults()">${this.videoResOpts((s.videoDefaults||{}).resolution || '1280 x 720 (16:9)')}</select>
                 </div>
+                <div class="form-col">
+                    <label class="form-label">默认每段帧数</label>
+                    <input type="number" class="form-input" id="vdSegFrames" min="1" max="2000" step="1"
+                        value="${Number.isFinite(+(s.videoDefaults||{}).segFrames) && +(s.videoDefaults||{}).segFrames > 0 ? +(s.videoDefaults||{}).segFrames : 90}"
+                        onchange="SettingsModule.saveVideoDefaults()" placeholder="90">
+                </div>
+                <div class="form-col">
+                    <label class="form-label">默认帧率 FPS</label>
+                    <input type="number" class="form-input" id="vdFps" min="1" max="120" step="1"
+                        value="${Number.isFinite(+(s.videoDefaults||{}).fps) && +(s.videoDefaults||{}).fps > 0 ? +(s.videoDefaults||{}).fps : 24}"
+                        onchange="SettingsModule.saveVideoDefaults()" placeholder="24">
+                </div>
             </div>
-            <p class="form-hint">进入「合成视频」时间轴时作为初始值：合成工作流 <code>director</code>(旧导演台) / <code>singularity</code>(乱神版V3) / <code>yusu</code>(Yusu 导演台)；Epsilon 越小越接近硬切（0.001），越大转场越柔和（1.0）；分辨率右侧标注横/竖屏与画面比例（乱神版V3 写入时间轴 resolution，旧导演台换算为 custom_width/height）。进入时间轴后仍可临时调整，点「生成视频」时会再次确认工作流。</p>
+            <p class="form-hint">进入「合成视频」时间轴时作为初始值：合成工作流 <code>director</code>(旧导演台) / <code>singularity</code>(乱神版V3) / <code>yusu</code>(Yusu 导演台)；Epsilon 越小越接近硬切（0.001），越大转场越柔和（1.0）；分辨率右侧标注横/竖屏与画面比例（乱神版V3 写入时间轴 resolution，旧导演台换算为 custom_width/height）。<b>默认每段帧数</b>=每个分镜段初始时长（帧），<b>默认帧率</b>=时间轴初始 FPS。进入时间轴后仍可临时调整，点「生成视频」时会再次确认工作流。</p>
         </div>
 
         <div class="settings-section">
@@ -305,7 +317,13 @@ const SettingsModule = {
         if (epsilon < 0.001) epsilon = 0.001;
         if (epsilon > 1) epsilon = 1;
         const resolution = ((document.getElementById('vdResolution') || {}).value) || '1280 x 720 (16:9)';
-        const videoDefaults = { ...(s.videoDefaults || {}), workflow, epsilon, resolution };
+        let segFrames = parseInt((document.getElementById('vdSegFrames') || {}).value, 10);
+        if (!Number.isFinite(segFrames) || segFrames < 1) segFrames = 90;
+        if (segFrames > 2000) segFrames = 2000;
+        let fps = parseInt((document.getElementById('vdFps') || {}).value, 10);
+        if (!Number.isFinite(fps) || fps < 1) fps = 24;
+        if (fps > 120) fps = 120;
+        const videoDefaults = { ...(s.videoDefaults || {}), workflow, epsilon, resolution, segFrames, fps };
         Storage.saveSettings({ videoDefaults });
         this.flashSaved();
     },
