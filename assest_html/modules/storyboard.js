@@ -4115,6 +4115,14 @@ emotions: this._collectEmotions(),
         let skipNoImg = 0;      // 已勾选合成但缺图，被跳过的分镜数
         let firstMeta = null;
 
+        // 默认每段时长：以「秒数」为准（videoDefaults.segSeconds），实际帧数 = 秒数 × 帧率，自动计算。
+        //   兼容旧数据：无 segSeconds 时回退旧的 segFrames（帧），再回退 3 秒。
+        const _vd = Storage.getSettings().videoDefaults || {};
+        const _fps = (Number.isFinite(+_vd.fps) && +_vd.fps > 0) ? Math.round(+_vd.fps) : this.FPS;
+        const DEF = (Number.isFinite(+_vd.segSeconds) && +_vd.segSeconds > 0)
+            ? Math.max(1, Math.round(+_vd.segSeconds * _fps))
+            : ((Number.isFinite(+_vd.segFrames) && +_vd.segFrames > 0) ? Math.round(+_vd.segFrames) : Math.round(3 * _fps));
+
         all.forEach((g) => {
             if (g.single) {
                 if (g.inlineParent) return;              // 内嵌单分镜由其父组循环负责插入，顶层跳过避免重复
@@ -4141,7 +4149,7 @@ emotions: this._collectEmotions(),
                             audioId: eAuds[i] || (i === 0 ? g.audioId : null),
                             // 各格用各自 local 提示语；空则回退整组 g.prompt
                             prompt: (eLocals[i] || '').trim() || (g.prompt || ''),
-                            length: 90, trimStart: 0,
+                            length: DEF, trimStart: 0,
                             transition: g.transition || 'cut',
                             shotTransition: (g.shotTransitions || [])[i] || '',
                             // 各格用各自台词；空则第 1 格回退 g.dialogue 兜底
@@ -4157,7 +4165,7 @@ emotions: this._collectEmotions(),
                     groupId: g.id, panel: 0, single: true,
                     imageId: g.imageId, audioId: g.audioId,
                     prompt: g.prompt || '',
-                    length: 90, trimStart: 0,
+                    length: DEF, trimStart: 0,
                     transition: g.transition || 'cut',
                     shotTransition: (g.shotTransitions || [])[0] || '',
                     dialogue: g.dialogue || {},
@@ -4193,7 +4201,7 @@ emotions: this._collectEmotions(),
                     imageId: imgId,
                     audioId: useOwn ? (auds[i] || null) : (isGroupFirst ? auds[i] : null),
                     prompt: (localPrompts[i] || '').trim(),   // 该格自己的 local 提示词
-                    length: 90, trimStart: 0,
+                    length: DEF, trimStart: 0,
                     transition: g.transition || 'cut',
                     shotTransition: (g.shotTransitions || [])[i] || '',
                     dialogue: useOwn ? (dlg[i] || {}) : (isGroupFirst ? (dlg[i] || {}) : {}),
@@ -4208,7 +4216,7 @@ emotions: this._collectEmotions(),
                         groupId: sg.id, panel: 0, single: true,
                         imageId: sg.imageId, audioId: sg.audioId,
                         prompt: sg.prompt || '',
-                        length: 90, trimStart: 0,
+                        length: DEF, trimStart: 0,
                         transition: sg.transition || 'cut',
                         shotTransition: (sg.shotTransitions || [])[0] || '',
                         dialogue: sg.dialogue || {},
@@ -4226,12 +4234,15 @@ emotions: this._collectEmotions(),
         if (skipNoImg) {
             App.showToast(`已纳入 ${segments.length} 段；另有 ${skipNoImg} 个勾选的分镜因缺图被跳过。`, 'info');
         }
+        // 诊断：打印各段的 组/面板/prompt头部/台词，用于核对「各段是否各自不同」（乱神版靠 prompt 里的台词说话）
+        console.log('[openTimeline] 纳入段：', segments.map((s, i) => ({
+            i, groupId: s.groupId, panel: s.panel, expanded: !!s.expanded,
+            promptHead: (s.prompt || '').slice(0, 16),
+            line: (s.dialogue && s.dialogue.text || '').slice(0, 16),
+        })));
         const first = firstMeta || {};
 
         // ===== 构建双轨时间轴模型（图像轨 + 音频轨，各自独立，可自由移位/拉伸/裁剪）=====
-        // 默认每段帧数：取设置 videoDefaults.segFrames（可在设置页配置），无则回退 90
-        const _vd = Storage.getSettings().videoDefaults || {};
-        const DEF = (Number.isFinite(+_vd.segFrames) && +_vd.segFrames > 0) ? Math.round(+_vd.segFrames) : 90;
         const imageClips = [];
         const audioClips = [];
         let cursor = 0;

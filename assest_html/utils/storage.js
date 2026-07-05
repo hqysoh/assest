@@ -261,7 +261,9 @@ const Storage = {
             // workflow: 'director'(旧导演台 LTXDirector) | 'singularity'(乱神版V3)
             videoDefaults: {
                 workflow: 'director',
-                epsilon: 0.9            // 过渡柔和度（0.001 硬切 ~ 1.0 最柔）
+                epsilon: 0.9,           // 过渡柔和度（0.001 硬切 ~ 1.0 最柔）
+                segSeconds: 3,          // 默认每段时长（秒）；实际帧数 = segSeconds × fps 自动计算
+                fps: 24                 // 时间轴初始帧率
             },
             theme: 'light'
         };
