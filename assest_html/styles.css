@@ -570,16 +570,22 @@ input[type="checkbox"]{accent-color:var(--ac)}
 .sb-pick-cell{position:relative;display:flex;flex-direction:column;align-items:center;gap:0.25rem;border:2px solid var(--bd);border-radius:8px;padding:0.35rem;cursor:pointer;transition:all .15s;background:var(--bg2)}
 .sb-pick-cell:hover{border-color:var(--ac)}
 .sb-pick-cell.selected{border-color:var(--ac);background:var(--tag-cc-bg)}
-.sb-pick-cell input[type=checkbox]{position:absolute;top:4px;left:4px;width:16px;height:16px;z-index:2}
+.sb-pick-cell input[type=checkbox]{position:absolute;bottom:22px;left:4px;width:16px;height:16px;z-index:5}
 .sb-pick-cell img{width:100%;height:72px;object-fit:cover;border-radius:5px;display:block}
-/* 历史图选择：删除按钮（右上角，hover 显示）+ 拖动状态 */
+/* 历史图选择：删除按钮（左上角，hover 显示）+ 拖动状态 */
 .sb-pick-cell{cursor:grab}
 .sb-pick-cell:active{cursor:grabbing}
-.sb-pick-del{position:absolute;top:3px;right:3px;z-index:6;width:18px;height:18px;line-height:16px;
+.sb-pick-del{position:absolute;top:3px;left:3px;z-index:6;width:18px;height:18px;line-height:16px;
 text-align:center;border:none;border-radius:50%;background:rgba(0,0,0,.55);color:#fff;font-size:13px;
 font-weight:700;cursor:pointer;padding:0;opacity:0;transition:opacity .15s,background .15s}
 .sb-pick-cell:hover .sb-pick-del{opacity:1}
 .sb-pick-del:hover{background:var(--danger,#ef4444)}
+/* 放大镜按钮：右上角，hover 显示，点击全屏看图（不影响勾选/选中） */
+.sb-pick-zoom{position:absolute;right:3px;top:3px;z-index:6;width:18px;height:18px;line-height:16px;
+text-align:center;border:none;border-radius:50%;background:rgba(0,0,0,.55);color:#fff;font-size:11px;
+cursor:pointer;padding:0;opacity:0;transition:opacity .15s,background .15s}
+.sb-pick-cell:hover .sb-pick-zoom{opacity:1}
+.sb-pick-zoom:hover{background:var(--ac,#3b82f6)}
 .sb-pick-cell.sb-pick-dragging{opacity:0.4}
 .sb-pick-cell.sb-pick-drop-target{outline:2px dashed var(--ac);outline-offset:2px}
 /* 拖动排序时，在「将插入的两张图之间」显示一条竖线光标（左半→插到该格前，右半→插到该格后） */

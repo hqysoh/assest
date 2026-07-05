@@ -724,11 +724,15 @@ const StoryboardModule = {
             `draggable="true" ondragstart="StoryboardModule._pickDragStart(event,${a.id})" ondragover="StoryboardModule._pickDragOver(event)" ondrop="StoryboardModule._pickDrop(event,${a.id})" ondragend="StoryboardModule._pickDragEnd(event)"`;
         const delBtn = (a) =>
             `<button type="button" class="sb-pick-del" title="删除这张图" onclick="event.stopPropagation();event.preventDefault();StoryboardModule._pickDeleteImage(${a.id})">×</button>`;
+        // 放大镜：全屏看图（复用 CharacterModule.openImageZoom，可缩放/拖动）。stopPropagation 避免触发选中/勾选。
+        const zoomBtn = (a) =>
+            `<button type="button" class="sb-pick-zoom" title="全屏查看这张图" onclick="event.stopPropagation();event.preventDefault();StoryboardModule._pickZoomImage(${a.id})">🔍</button>`;
         const cellHtml = (a) => {
             const sel = chosen && chosen.has(String(a.id));
             if (mode === 'single') {
                 return `
                     <div class="sb-pick-cell ${sel ? 'selected' : ''}" data-id="${a.id}" ${dndAttrs(a)} onclick="${singleClickCall}(${a.id})">
+                        ${zoomBtn(a)}
                         ${delBtn(a)}
                         <img src="${a.url}" loading="lazy">
                         <span class="sb-pick-name">${this.esc(a.name)}</span>
@@ -736,6 +740,7 @@ const StoryboardModule = {
             }
             return `
                 <label class="sb-pick-cell ${sel ? 'selected' : ''}" data-id="${a.id}" ${dndAttrs(a)}>
+                    ${zoomBtn(a)}
                     ${delBtn(a)}
                     <input type="checkbox" value="${a.id}" ${sel ? 'checked' : ''} onchange="this.closest('.sb-pick-cell').classList.toggle('selected', this.checked);StoryboardModule._updatePickCount()">
                     <img src="${a.url}" loading="lazy">
@@ -759,6 +764,20 @@ const StoryboardModule = {
                 ${body}
             </div>`;
         }).join('');
+    },
+
+    // 放大镜：全屏查看选图弹窗里的某张图（复用 CharacterModule.openImageZoom，可缩放/拖动）。
+    _pickZoomImage(mediaId) {
+        mediaId = parseInt(mediaId, 10);
+        const m = Storage.getMediaById(this.projectId, mediaId);
+        if (!m) { App.showToast('图像不存在', 'error'); return; }
+        const url = Storage.mediaUrl(m.data);
+        const dim = (m.width && m.height) ? `${m.width} × ${m.height}` : '#' + m.id;
+        if (typeof CharacterModule !== 'undefined' && CharacterModule.openImageZoom) {
+            CharacterModule.openImageZoom(url, '参考图', dim);
+        } else {
+            window.open(url, '_blank');
+        }
     },
 
     // ===== 历史图像选择弹窗：删除 / 拖动排序（参考图、合成选图、替换、引导图等所有 _renderPickBlocks 渲染的弹窗共用）=====
@@ -1045,8 +1064,10 @@ const StoryboardModule = {
         if (manual) {
             refIds = Array.from(new Set((g.refImageIds || []).map(v => parseInt(v)).filter(v => !isNaN(v))));
         } else {
+            // 默认：把「本分镜当前已有图」放最前（@图1=当前图，便于基于现有图编辑），再补上前一帧、后一帧。
             const { prevId, nextId } = this._neighborFrameIds(g);
-            refIds = Array.from(new Set([prevId, nextId].filter(v => v != null).map(v => parseInt(v))));
+            const curId = (g.imageId != null) ? parseInt(g.imageId) : null;
+            refIds = Array.from(new Set([curId, prevId, nextId].filter(v => v != null).map(v => parseInt(v))));
         }
         this._sgCtx = { gid, refs: refIds, manual: !!manual };
 
